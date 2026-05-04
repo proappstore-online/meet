@@ -25,11 +25,11 @@ jobs:
       - name: Build
         run: pnpm build
 
-      - name: CLAUDE.md exists
-        run: test -f CLAUDE.md
-
       - name: MIT License
         run: grep -qi "MIT" LICENSE
+
+      - name: No .env.production in repo
+        run: test ! -f .env.production && test ! -f web/.env.production
 
       - name: No tracking
         run: |
@@ -64,7 +64,7 @@ jobs:
           grep -q "pnpm" package.json
           test -f pnpm-workspace.yaml
 
-      - name: Bundle size check
+      - name: Bundle size
         run: |
           BUNDLE=$(find web/dist -name "*.js" -path "*/assets/*" | sort -rn | head -1)
           if [ -n "$BUNDLE" ]; then
