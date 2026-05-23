@@ -7,6 +7,8 @@ import { useWebRTC } from './hooks/useWebRTC.ts'
 import { generateRoomId, getRoomIdFromUrl, getMeetingLink } from './lib/room.ts'
 import { createRawRoom } from './lib/raw-room.ts'
 
+declare const __BUILD_HASH__: string
+
 const fas = initApp({ appId: 'meet' })
 
 function ConnectionBadge({ state }: { state: ConnectionState }) {
@@ -361,7 +363,7 @@ export default function App() {
                 </button>
               </div>
               <div className="px-3 py-1 font-mono text-[0.6rem] text-[var(--ink)] border-b border-[var(--line)]">
-                room: meet-{activeRoomId} | role: {isHost ? 'HOST' : 'GUEST'} | myRoom: {myRoomId} | urlRoom: {urlRoomId ?? 'none'} | ws: {roomState}
+                build: {__BUILD_HASH__} | room: meet-{activeRoomId} | role: {isHost ? 'HOST' : 'GUEST'} | ws: {roomState}
               </div>
               <div className="max-h-40 overflow-y-auto px-3 pb-2">
                 {logs.map((line, i) => (
