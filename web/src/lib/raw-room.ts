@@ -40,7 +40,8 @@ export function createRawRoom(
 
   function connect() {
     if (closed) return
-    const url = new URL(`/v1/apps/${appId}/rooms/${roomId}`, 'wss://api.proappstore.online')
+    // Rooms run on the FAS API (shared infra) — PAS API doesn't have its own Room DO
+    const url = new URL(`/v1/apps/${appId}/rooms/${roomId}`, 'wss://api.freeappstore.online')
     url.searchParams.set('token', token)
     log(`raw-room: connecting to ${url.pathname}`)
     setState('connecting')
