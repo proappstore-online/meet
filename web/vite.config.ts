@@ -34,9 +34,9 @@ export default defineConfig({
         ],
       },
       manifest: {
-        name: 'APPNAME',
-        short_name: 'APPNAME',
-        description: 'Free APPNAME app — part of FreeAppStore',
+        name: 'Meet',
+        short_name: 'Meet',
+        description: 'Instant 1-on-1 video meetings — part of FreeAppStore',
         start_url: '/',
         display: 'standalone',
         background_color: '#ffffff',

@@ -1,0 +1,11 @@
+{
+  "name": "Meet",
+  "short_name": "Meet",
+  "description": "Instant 1-on-1 video meetings — part of FreeAppStore",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "min_viewport_width": 360,
+  "background_color": "#000000",
+  "theme_color": "#000000"
+}

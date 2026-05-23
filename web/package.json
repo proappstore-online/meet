@@ -1,5 +1,5 @@
 {
-  "name": "@APPNAME/web",
+  "name": "@meet/web",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@freeappstore/sdk": "^0.10.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5"
   },
