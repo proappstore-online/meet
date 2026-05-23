@@ -4,26 +4,9 @@ import type { User, Room, ConnectionState } from '@freeappstore/sdk'
 import { Shell } from './components/Shell.tsx'
 import { VideoTile } from './components/VideoTile.tsx'
 import { useWebRTC } from './hooks/useWebRTC.ts'
+import { generateRoomId, getRoomIdFromUrl, getMeetingLink } from './lib/room.ts'
 
 const fas = initApp({ appId: 'meet' })
-
-function generateRoomId(): string {
-  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
-  let id = ''
-  for (let i = 0; i < 10; i++) {
-    id += chars[Math.floor(Math.random() * chars.length)]
-  }
-  return id
-}
-
-function getRoomIdFromUrl(): string | null {
-  const params = new URLSearchParams(window.location.search)
-  return params.get('room')
-}
-
-function getMeetingLink(roomId: string): string {
-  return `${window.location.origin}?room=${roomId}`
-}
 
 function ConnectionBadge({ state }: { state: ConnectionState }) {
   const color =
