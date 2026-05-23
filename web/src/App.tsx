@@ -328,7 +328,8 @@ export default function App() {
   }
 
   // Lobby — user is signed in, no active meeting
-  const isJoining = urlRoomId && urlRoomId !== myRoomId
+  // Show join flow whenever ?room= is present (even if it's your own link)
+  const isJoining = !!urlRoomId
 
   return (
     <Shell user={user} onSignIn={(p) => fas.auth.signIn(p)} onSignOut={() => fas.auth.signOut()}>
@@ -341,6 +342,7 @@ export default function App() {
             <p className="text-center text-sm text-[var(--muted)]">
               You have been invited to a meeting
             </p>
+            <span className="rounded-lg bg-[var(--paper)] px-3 py-1 font-mono text-sm text-[var(--ink)]">{urlRoomId}</span>
             <button
               onClick={handleJoinMeeting}
               className="w-full rounded-xl bg-[var(--success)] px-6 py-3.5 text-base font-bold text-white hover:opacity-90"
