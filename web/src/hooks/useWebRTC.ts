@@ -204,7 +204,7 @@ export function useWebRTC(isHost: boolean) {
     roomRef.current = room
     if (!room) { log('room cleared'); return }
 
-    log(`subscribing to room (state=${room.state})`)
+    log(`setRoom: subscribing (state=${room.state})`)
 
     // Subscribe SYNCHRONOUSLY — no waiting for React render
     unsubMessageRef.current = room.onMessage<SignalMessage>((msg) => {
@@ -215,7 +215,7 @@ export function useWebRTC(isHost: boolean) {
       log(`peers: [${peers.map(p => p.login).join(', ')}]`)
     })
 
-    log('subscribed to messages + peers')
+    log('setRoom: subscribed to messages + peers')
   }, [handleMessage, log])
 
   const startCall = useCallback(async () => {

@@ -117,22 +117,24 @@ export default function App() {
     setActiveRoomId(roomId)
 
     const roomName = `meet-${roomId}`
-    console.log(`[meet] joining room: ${roomName} as ${asHost ? 'HOST' : 'GUEST'}`)
     const r = fas.rooms.join(roomName)
     roomRef.current = r
-
-    // Diagnostic: raw listener to verify SDK delivers messages at all
-    r.onMessage((msg: unknown) => {
-      console.log('[meet] RAW onMessage:', JSON.stringify(msg))
-    })
 
     // Subscribe IMMEDIATELY — before React re-renders
     setRoom(r)
 
+    // Diagnostic: raw listener + room name in visible log
+    r.onMessage((msg: unknown) => {
+      console.log('[meet] RAW onMessage:', JSON.stringify(msg))
+    })
+
     r.onConnectionState((state) => {
-      console.log(`[meet] room ${roomName} state: ${state}`)
+      console.log(`[meet] room=${roomName} role=${asHost ? 'HOST' : 'GUEST'} state=${state}`)
       setRoomState(state)
     })
+
+    // Log the join to the in-app debug panel via console (visible in browser)
+    console.log(`[meet] joinRoom: name=${roomName} role=${asHost ? 'HOST' : 'GUEST'} roomId=${roomId}`)
   }, [])
 
   /** Start a meeting as host. */
@@ -359,6 +361,9 @@ export default function App() {
                 >
                   Copy logs
                 </button>
+              </div>
+              <div className="px-3 py-1 font-mono text-[0.6rem] text-[var(--ink)] border-b border-[var(--line)]">
+                room: meet-{activeRoomId} | role: {isHost ? 'HOST' : 'GUEST'} | myRoom: {myRoomId} | urlRoom: {urlRoomId ?? 'none'} | ws: {roomState}
               </div>
               <div className="max-h-40 overflow-y-auto px-3 pb-2">
                 {logs.map((line, i) => (
