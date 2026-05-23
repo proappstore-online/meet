@@ -12,7 +12,13 @@ interface SignalOffer { type: 'offer'; sdp: string }
 interface SignalAnswer { type: 'answer'; sdp: string }
 interface SignalCandidate { type: 'candidate'; candidate: RTCIceCandidateInit }
 interface SignalRequestOffer { type: 'request-offer' }
-type SignalMessage = SignalOffer | SignalAnswer | SignalCandidate | SignalRequestOffer
+interface SignalChat { type: 'chat'; text: string }
+interface SignalHandRaise { type: 'hand-raise'; raised: boolean }
+interface SignalReaction { type: 'reaction'; emoji: string }
+type SignalMessage = SignalOffer | SignalAnswer | SignalCandidate | SignalRequestOffer | SignalChat | SignalHandRaise | SignalReaction
+
+export interface ChatMessage { from: string; text: string; at: number; isMine: boolean }
+export interface Reaction { id: string; emoji: string; at: number }
 
 export type CallState = 'idle' | 'waiting' | 'connecting' | 'connected' | 'error' | 'peer-left'
 
@@ -24,6 +30,10 @@ export function useWebRTC(isHost: boolean) {
   const [videoEnabled, setVideoEnabled] = useState(true)
   const [screenSharing, setScreenSharing] = useState(false)
   const [logs, setLogs] = useState<string[]>([])
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
+  const [peerHandRaised, setPeerHandRaised] = useState(false)
+  const [myHandRaised, setMyHandRaised] = useState(false)
+  const [reactions, setReactions] = useState<Reaction[]>([])
 
   const pcRef = useRef<RTCPeerConnection | null>(null)
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([])
@@ -190,6 +200,14 @@ export function useWebRTC(isHost: boolean) {
             pendingCandidatesRef.current.push(data.candidate)
             log(`queued ICE candidate (${pendingCandidatesRef.current.length} pending)`)
           }
+        } else if (data.type === 'chat') {
+          setChatMessages(prev => [...prev.slice(-99), { from: msg.from.login, text: data.text, at: Date.now(), isMine: false }])
+        } else if (data.type === 'hand-raise') {
+          setPeerHandRaised(data.raised)
+        } else if (data.type === 'reaction') {
+          const r: Reaction = { id: Math.random().toString(36).slice(2, 8), emoji: data.emoji, at: Date.now() }
+          setReactions(prev => [...prev, r])
+          setTimeout(() => setReactions(prev => prev.filter(x => x.id !== r.id)), 3000)
         }
       } catch (e) {
         log(`signaling error: ${e}`)
@@ -348,6 +366,30 @@ export function useWebRTC(isHost: boolean) {
     }
   }, [screenSharing, log])
 
+  const sendChat = useCallback((text: string) => {
+    const room = roomRef.current
+    if (!room) return
+    room.send<SignalMessage>({ type: 'chat', text })
+    setChatMessages(prev => [...prev.slice(-99), { from: 'You', text, at: Date.now(), isMine: true }])
+  }, [])
+
+  const toggleHandRaise = useCallback(() => {
+    setMyHandRaised(prev => {
+      const next = !prev
+      const room = roomRef.current
+      if (room) room.send<SignalMessage>({ type: 'hand-raise', raised: next })
+      return next
+    })
+  }, [])
+
+  const sendReaction = useCallback((emoji: string) => {
+    const room = roomRef.current
+    if (room) room.send<SignalMessage>({ type: 'reaction', emoji })
+    const r: Reaction = { id: Math.random().toString(36).slice(2, 8), emoji, at: Date.now() }
+    setReactions(prev => [...prev, r])
+    setTimeout(() => setReactions(prev => prev.filter(x => x.id !== r.id)), 3000)
+  }, [])
+
   const endCall = useCallback(() => {
     startingRef.current = false
     if (offerRetryRef.current) {
@@ -373,6 +415,10 @@ export function useWebRTC(isHost: boolean) {
     setVideoEnabled(true)
     setScreenSharing(false)
     setLogs([])
+    setChatMessages([])
+    setPeerHandRaised(false)
+    setMyHandRaised(false)
+    setReactions([])
   }, [])
 
   // Warn before closing tab during active call
@@ -406,11 +452,18 @@ export function useWebRTC(isHost: boolean) {
     videoEnabled,
     logs,
     screenSharing,
+    chatMessages,
+    peerHandRaised,
+    myHandRaised,
+    reactions,
     startCall,
     endCall,
     toggleAudio,
     toggleVideo,
     toggleScreenShare,
+    sendChat,
+    toggleHandRaise,
+    sendReaction,
     setRoom,
     log,
   }
