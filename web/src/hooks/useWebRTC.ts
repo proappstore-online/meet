@@ -22,11 +22,13 @@ export function useWebRTC(isHost: boolean) {
   const [callState, setCallState] = useState<CallState>('idle')
   const [audioEnabled, setAudioEnabled] = useState(true)
   const [videoEnabled, setVideoEnabled] = useState(true)
+  const [screenSharing, setScreenSharing] = useState(false)
   const [logs, setLogs] = useState<string[]>([])
 
   const pcRef = useRef<RTCPeerConnection | null>(null)
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([])
   const localStreamRef = useRef<MediaStream | null>(null)
+  const cameraTrackRef = useRef<MediaStreamTrack | null>(null)
   const startingRef = useRef(false)
   const offerRetryRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const roomRef = useRef<Room | null>(null)
@@ -289,6 +291,63 @@ export function useWebRTC(isHost: boolean) {
     }
   }, [])
 
+  const toggleScreenShare = useCallback(async () => {
+    const pc = pcRef.current
+    if (!pc || !localStreamRef.current) return
+
+    if (screenSharing) {
+      // Stop screen share, restore camera
+      const screenTrack = localStreamRef.current.getVideoTracks()[0]
+      if (screenTrack) screenTrack.stop()
+
+      if (cameraTrackRef.current) {
+        // Replace screen track with camera track on the peer connection
+        const sender = pc.getSenders().find(s => s.track?.kind === 'video' || (s.track === null && s !== pc.getSenders().find(ss => ss.track?.kind === 'audio')))
+        if (sender) await sender.replaceTrack(cameraTrackRef.current)
+
+        // Update local stream
+        localStreamRef.current.removeTrack(localStreamRef.current.getVideoTracks()[0])
+        localStreamRef.current.addTrack(cameraTrackRef.current)
+        setLocalStream(new MediaStream(localStreamRef.current.getTracks()))
+      }
+      setScreenSharing(false)
+      log('stopped screen share, restored camera')
+    } else {
+      // Start screen share
+      let screenStream: MediaStream
+      try {
+        screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true })
+      } catch {
+        log('screen share cancelled or denied')
+        return
+      }
+
+      const screenTrack = screenStream.getVideoTracks()[0]
+      if (!screenTrack) return
+
+      // Save camera track for later restoration
+      const currentVideoTrack = localStreamRef.current.getVideoTracks()[0]
+      if (currentVideoTrack) cameraTrackRef.current = currentVideoTrack
+
+      // Replace camera track with screen track on the peer connection
+      const sender = pc.getSenders().find(s => s.track?.kind === 'video')
+      if (sender) await sender.replaceTrack(screenTrack)
+
+      // Update local stream
+      if (currentVideoTrack) localStreamRef.current.removeTrack(currentVideoTrack)
+      localStreamRef.current.addTrack(screenTrack)
+      setLocalStream(new MediaStream(localStreamRef.current.getTracks()))
+
+      // When user stops sharing via browser UI, auto-restore camera
+      screenTrack.onended = () => {
+        toggleScreenShare()
+      }
+
+      setScreenSharing(true)
+      log('started screen share')
+    }
+  }, [screenSharing, log])
+
   const endCall = useCallback(() => {
     startingRef.current = false
     if (offerRetryRef.current) {
@@ -308,9 +367,11 @@ export function useWebRTC(isHost: boolean) {
     pendingCandidatesRef.current = []
     setLocalStream(null)
     setRemoteStream(null)
+    cameraTrackRef.current = null
     setCallState('idle')
     setAudioEnabled(true)
     setVideoEnabled(true)
+    setScreenSharing(false)
     setLogs([])
   }, [])
 
@@ -344,10 +405,12 @@ export function useWebRTC(isHost: boolean) {
     audioEnabled,
     videoEnabled,
     logs,
+    screenSharing,
     startCall,
     endCall,
     toggleAudio,
     toggleVideo,
+    toggleScreenShare,
     setRoom,
     log,
   }

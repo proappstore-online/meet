@@ -74,8 +74,8 @@ export default function App() {
 
   const {
     localStream, remoteStream, callState,
-    audioEnabled, videoEnabled,
-    startCall, endCall, toggleAudio, toggleVideo, setRoom,
+    audioEnabled, videoEnabled, screenSharing,
+    startCall, endCall, toggleAudio, toggleVideo, toggleScreenShare, setRoom,
   } = useWebRTC(isHost)
 
   useEffect(() => {
@@ -337,6 +337,9 @@ export default function App() {
           <button onClick={toggleVideo} className={`flex h-12 w-12 items-center justify-center rounded-full ${videoEnabled ? 'bg-white/10 text-white' : 'bg-red-500/80 text-white'}`}>
             {videoEnabled ? (<svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9.75a2.25 2.25 0 0 0 2.25-2.25V7.5a2.25 2.25 0 0 0-2.25-2.25H4.5A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" /></svg>
             ) : (<svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M12 18.75H4.5a2.25 2.25 0 0 1-2.25-2.25V9m12.841 9.091L16.5 19.5m-1.409-.409L12 15.75M2.25 9V7.5a2.25 2.25 0 0 1 2.25-2.25h9.75M3 3l18 18" /></svg>)}
+          </button>
+          <button onClick={toggleScreenShare} className={`flex h-12 w-12 items-center justify-center rounded-full ${screenSharing ? 'bg-blue-500/80 text-white' : 'bg-white/10 text-white'}`}>
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0V12a9 9 0 1 1-18 0V5.25" /></svg>
           </button>
           <button onClick={copyLink} className={`flex h-12 w-12 items-center justify-center rounded-full ${copied ? 'bg-green-500/80 text-white' : 'bg-white/10 text-white'}`}>
             {copied ? (<svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
