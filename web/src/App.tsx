@@ -50,6 +50,7 @@ export default function App() {
     callState,
     audioEnabled,
     videoEnabled,
+    logs,
     startCall,
     endCall,
     toggleAudio,
@@ -120,6 +121,7 @@ export default function App() {
     setRoom(r)
 
     r.onConnectionState((state) => {
+      console.log(`[meet] room state: ${state}`)
       setRoomState(state)
     })
   }, [])
@@ -331,6 +333,31 @@ export default function App() {
               End
             </button>
           </div>
+
+          {/* Debug log */}
+          {logs.length > 0 && (
+            <details open className="rounded-xl border border-[var(--line)] bg-[var(--panel)]">
+              <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-[var(--muted)]">
+                Debug log ({logs.length})
+              </summary>
+              <div className="flex justify-end px-3">
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(logs.join('\n'))
+                    alert('Logs copied!')
+                  }}
+                  className="rounded border border-[var(--line)] px-2 py-0.5 text-[0.6rem] font-medium text-[var(--muted)] hover:text-[var(--ink)]"
+                >
+                  Copy logs
+                </button>
+              </div>
+              <div className="max-h-40 overflow-y-auto px-3 pb-2">
+                {logs.map((line, i) => (
+                  <div key={i} className="font-mono text-[0.6rem] leading-tight text-[var(--muted)]">{line}</div>
+                ))}
+              </div>
+            </details>
+          )}
         </div>
       </Shell>
     )

@@ -8,26 +8,10 @@ const ICE_SERVERS: RTCConfiguration = {
   ],
 }
 
-/** Signaling message types sent through the SDK room. */
-interface SignalOffer {
-  type: 'offer'
-  sdp: string
-}
-
-interface SignalAnswer {
-  type: 'answer'
-  sdp: string
-}
-
-interface SignalCandidate {
-  type: 'candidate'
-  candidate: RTCIceCandidateInit
-}
-
-interface SignalRequestOffer {
-  type: 'request-offer'
-}
-
+interface SignalOffer { type: 'offer'; sdp: string }
+interface SignalAnswer { type: 'answer'; sdp: string }
+interface SignalCandidate { type: 'candidate'; candidate: RTCIceCandidateInit }
+interface SignalRequestOffer { type: 'request-offer' }
 type SignalMessage = SignalOffer | SignalAnswer | SignalCandidate | SignalRequestOffer
 
 export type CallState = 'idle' | 'waiting' | 'connecting' | 'connected' | 'error' | 'peer-left'
@@ -38,6 +22,7 @@ export function useWebRTC(room: Room | null, isHost: boolean) {
   const [callState, setCallState] = useState<CallState>('idle')
   const [audioEnabled, setAudioEnabled] = useState(true)
   const [videoEnabled, setVideoEnabled] = useState(true)
+  const [logs, setLogs] = useState<string[]>([])
 
   const pcRef = useRef<RTCPeerConnection | null>(null)
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([])
@@ -45,48 +30,59 @@ export function useWebRTC(room: Room | null, isHost: boolean) {
   const startingRef = useRef(false)
   const offerRetryRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  /** Flush any ICE candidates queued before remote description was set. */
+  const log = useCallback((msg: string) => {
+    const ts = new Date().toLocaleTimeString('en-US', { hour12: false, fractionalSecondDigits: 1 })
+    const entry = `[${ts}] ${msg}`
+    console.log(`[meet] ${msg}`)
+    setLogs(prev => [...prev.slice(-49), entry])
+  }, [])
+
   const flushCandidates = useCallback(async () => {
     const pc = pcRef.current
     if (!pc || !pc.remoteDescription) return
+    const count = pendingCandidatesRef.current.length
     for (const c of pendingCandidatesRef.current) {
       await pc.addIceCandidate(new RTCIceCandidate(c))
     }
     pendingCandidatesRef.current = []
-  }, [])
+    if (count > 0) log(`flushed ${count} queued ICE candidates`)
+  }, [log])
 
-  /** Create the RTCPeerConnection and wire its events. */
   const createPeerConnection = useCallback(() => {
     if (pcRef.current) {
+      log('closing previous PC')
       pcRef.current.close()
     }
 
     const pc = new RTCPeerConnection(ICE_SERVERS)
     pcRef.current = pc
+    log('created RTCPeerConnection')
 
-    // Send ICE candidates to the other peer via the signaling room.
     pc.onicecandidate = (e) => {
       if (e.candidate && room) {
         room.send<SignalMessage>({ type: 'candidate', candidate: e.candidate.toJSON() })
       }
     }
 
-    // Receive remote tracks.
+    pc.oniceconnectionstatechange = () => {
+      log(`ICE state: ${pc.iceConnectionState}`)
+    }
+
     const remote = new MediaStream()
     setRemoteStream(remote)
     pc.ontrack = (e) => {
+      log(`got remote track: ${e.track.kind}`)
       remote.addTrack(e.track)
-      // Force a re-render when the remote stream changes.
       setRemoteStream(new MediaStream(remote.getTracks()))
     }
 
     pc.onconnectionstatechange = () => {
+      log(`PC state: ${pc.connectionState}`)
       if (pc.connectionState === 'connected') {
         setCallState('connected')
       } else if (pc.connectionState === 'failed') {
         setCallState('error')
       } else if (pc.connectionState === 'disconnected') {
-        // Peer may have left — wait briefly then check if it's permanent.
         setTimeout(() => {
           if (pc.connectionState === 'disconnected') {
             setCallState('peer-left')
@@ -95,33 +91,43 @@ export function useWebRTC(room: Room | null, isHost: boolean) {
       }
     }
 
-    return pc
-  }, [room])
+    pc.onsignalingstatechange = () => {
+      log(`signaling state: ${pc.signalingState}`)
+    }
 
-  /** Acquire camera+mic with audio-only fallback. */
+    return pc
+  }, [room, log])
+
   const acquireMedia = useCallback(async (): Promise<MediaStream> => {
+    log('requesting camera+mic...')
     try {
-      return await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+      const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+      log(`got media: ${s.getTracks().map(t => t.kind).join(', ')}`)
+      return s
     } catch (e) {
-      // Camera might be unavailable — try audio-only.
       if (e instanceof DOMException && e.name !== 'NotAllowedError') {
-        return await navigator.mediaDevices.getUserMedia({ video: false, audio: true })
+        log(`camera failed (${e.name}), trying audio-only...`)
+        const s = await navigator.mediaDevices.getUserMedia({ video: false, audio: true })
+        log('got audio-only stream')
+        return s
       }
       throw e
     }
-  }, [])
+  }, [log])
 
-  /** Start the call: acquire media, create PC, and if host send an offer. */
   const startCall = useCallback(async () => {
-    if (!room || startingRef.current) return
+    if (!room) { log('startCall: no room'); return }
+    if (startingRef.current) { log('startCall: already starting'); return }
     startingRef.current = true
+    log(`startCall as ${isHost ? 'HOST' : 'GUEST'}`)
 
     setCallState('waiting')
 
     let stream: MediaStream
     try {
       stream = await acquireMedia()
-    } catch {
+    } catch (e) {
+      log(`getUserMedia failed: ${e}`)
       setCallState('error')
       startingRef.current = false
       return
@@ -135,53 +141,58 @@ export function useWebRTC(room: Room | null, isHost: boolean) {
     for (const track of stream.getTracks()) {
       pc.addTrack(track, stream)
     }
+    log(`added ${stream.getTracks().length} local tracks to PC`)
 
     if (isHost) {
       const offer = await pc.createOffer()
       await pc.setLocalDescription(offer)
       room.send<SignalMessage>({ type: 'offer', sdp: offer.sdp! })
+      log('sent initial offer')
       setCallState('waiting')
     } else {
-      // Ask the host to (re)send their offer. Retry every 2s — the host
-      // might still be waiting for getUserMedia when our first request lands.
       room.send<SignalMessage>({ type: 'request-offer' })
+      log('sent request-offer')
       if (offerRetryRef.current) clearInterval(offerRetryRef.current)
       offerRetryRef.current = setInterval(() => {
         if (!room || pcRef.current?.remoteDescription) {
           if (offerRetryRef.current) clearInterval(offerRetryRef.current)
           offerRetryRef.current = null
+          log('stopped request-offer retry (got remote desc)')
           return
         }
         room.send<SignalMessage>({ type: 'request-offer' })
+        log('retried request-offer')
       }, 2000)
       setCallState('connecting')
     }
     startingRef.current = false
-  }, [room, isHost, createPeerConnection, acquireMedia])
+  }, [room, isHost, createPeerConnection, acquireMedia, log])
 
-  /** Handle incoming signaling messages from the room. */
+  // Handle incoming signaling messages
   useEffect(() => {
     if (!room) return
 
     const unsub = room.onMessage<SignalMessage>((msg: RoomMessage<SignalMessage>) => {
       const data = msg.data
+      log(`recv: ${data.type} from ${msg.from.login}`)
       ;(async () => {
         try {
           if (data.type === 'offer') {
-            // Stop retrying — we got an offer.
             if (offerRetryRef.current) {
               clearInterval(offerRetryRef.current)
               offerRetryRef.current = null
             }
             let pc = pcRef.current
             if (!pc || pc.signalingState === 'closed') {
+              log('no PC or closed — creating new one for offer')
               if (!localStreamRef.current) {
                 try {
                   const stream = await acquireMedia()
                   localStreamRef.current = stream
                   setLocalStream(stream)
                   setVideoEnabled(stream.getVideoTracks().length > 0)
-                } catch {
+                } catch (e) {
+                  log(`getUserMedia failed in offer handler: ${e}`)
                   setCallState('error')
                   return
                 }
@@ -190,68 +201,77 @@ export function useWebRTC(room: Room | null, isHost: boolean) {
               for (const track of localStreamRef.current!.getTracks()) {
                 pc.addTrack(track, localStreamRef.current!)
               }
+              log(`added ${localStreamRef.current!.getTracks().length} tracks to new PC`)
             }
+            log(`setting remote desc (offer), current signalingState=${pc.signalingState}`)
             await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: data.sdp }))
             await flushCandidates()
             const answer = await pc.createAnswer()
             await pc.setLocalDescription(answer)
             room.send<SignalMessage>({ type: 'answer', sdp: answer.sdp! })
+            log('sent answer')
             setCallState('connecting')
           } else if (data.type === 'answer') {
             const pc = pcRef.current
-            if (!pc) return
+            if (!pc) { log('recv answer but no PC'); return }
+            log(`setting remote desc (answer), current signalingState=${pc.signalingState}`)
             await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: data.sdp }))
             await flushCandidates()
+            log('answer applied')
             setCallState('connecting')
           } else if (data.type === 'request-offer') {
-            // Guest is asking us to (re)send our offer.
             const pc = pcRef.current
-            if (!pc || pc.connectionState === 'connected') return
+            if (!pc) { log('recv request-offer but no PC — ignoring'); return }
+            if (pc.connectionState === 'connected') { log('recv request-offer but already connected'); return }
+            log(`responding to request-offer, signalingState=${pc.signalingState}`)
             const offer = await pc.createOffer()
             await pc.setLocalDescription(offer)
             room.send<SignalMessage>({ type: 'offer', sdp: offer.sdp! })
+            log('sent offer (in response to request)')
           } else if (data.type === 'candidate') {
             const pc = pcRef.current
-            if (!pc) return
+            if (!pc) { log('recv candidate but no PC'); return }
             if (pc.remoteDescription) {
               await pc.addIceCandidate(new RTCIceCandidate(data.candidate))
             } else {
               pendingCandidatesRef.current.push(data.candidate)
+              log(`queued ICE candidate (${pendingCandidatesRef.current.length} pending)`)
             }
           }
-        } catch {
-          // Swallow WebRTC errors from stale/closed peer connections.
-          // A new offer will arrive and re-establish.
+        } catch (e) {
+          log(`signaling error: ${e}`)
         }
       })()
     })
 
     return unsub
-  }, [room, createPeerConnection, flushCandidates, acquireMedia])
+  }, [room, createPeerConnection, flushCandidates, acquireMedia, log])
 
-  /** When peers join (>1 peer in the room), the host re-sends the offer. */
+  // Host re-offers on peer list change
   useEffect(() => {
     if (!room || !isHost) return
 
-    const unsub = room.onPeers((_peers) => {
-      // A peer joined/left — if we're still waiting, re-send the offer.
+    const unsub = room.onPeers((peers) => {
+      log(`peers update: ${peers.map(p => p.login).join(', ') || '(empty)'}`)
       if (!pcRef.current || !localStreamRef.current) return
       ;(async () => {
         try {
           const pc = pcRef.current
           if (!pc || pc.signalingState === 'closed') return
           if (pc.connectionState === 'connected') return
+          log('re-offering due to peers change')
           const offer = await pc.createOffer()
           await pc.setLocalDescription(offer)
           room.send<SignalMessage>({ type: 'offer', sdp: offer.sdp! })
-        } catch {
-          // Stale PC — next peer join will retry.
+          log('sent offer (peers change)')
+        } catch (e) {
+          log(`peers re-offer error: ${e}`)
         }
       })()
     })
 
     return unsub
-  }, [room, isHost])
+  }, [room, isHost, log])
 
   const toggleAudio = useCallback(() => {
     if (localStreamRef.current) {
@@ -295,9 +315,10 @@ export function useWebRTC(room: Room | null, isHost: boolean) {
     setCallState('idle')
     setAudioEnabled(true)
     setVideoEnabled(true)
+    setLogs([])
   }, [])
 
-  // Warn before closing tab during active call.
+  // Warn before closing tab during active call
   useEffect(() => {
     if (callState !== 'connected' && callState !== 'waiting' && callState !== 'connecting') return
     const handler = (e: BeforeUnloadEvent) => { e.preventDefault() }
@@ -305,7 +326,7 @@ export function useWebRTC(room: Room | null, isHost: boolean) {
     return () => window.removeEventListener('beforeunload', handler)
   }, [callState])
 
-  // Cleanup on unmount.
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (offerRetryRef.current) clearInterval(offerRetryRef.current)
@@ -324,6 +345,7 @@ export function useWebRTC(room: Room | null, isHost: boolean) {
     callState,
     audioEnabled,
     videoEnabled,
+    logs,
     startCall,
     endCall,
     toggleAudio,
