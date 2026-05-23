@@ -254,14 +254,20 @@ export default function App() {
     // startCall will be triggered by the auto-start useEffect below
   }, [myRoomId, setRoom])
 
-  // === HOST: Direct start meeting ===
-  const handleStartMeeting = useCallback(() => {
+  // === HOST: Instant meeting — one click: start + copy link ===
+  const handleStartMeeting = useCallback(async () => {
     if (!myRoomId || !user) return
     const r = connectRoom(myRoomId)
     if (!r) return
     setIsHost(true)
     setActiveRoomId(myRoomId)
     setRoom(r)
+    // Auto-copy link so host can paste it immediately
+    try {
+      await navigator.clipboard.writeText(getMeetingLink(myRoomId))
+      setCopied(true)
+      setTimeout(() => setCopied(false), 3000)
+    } catch { /* clipboard might fail on some browsers */ }
   }, [myRoomId, user, connectRoom, setRoom])
 
   // === GUEST: Join meeting ===
@@ -526,35 +532,53 @@ export default function App() {
             <button onClick={handleJoinMeeting} className="w-full rounded-xl bg-[var(--success)] px-6 py-3.5 text-base font-bold text-white hover:opacity-90">Join Meeting</button>
           </div>
         ) : (
-          <>
-            <div className="flex w-full max-w-sm flex-col gap-4 rounded-2xl border border-[var(--line)] bg-[var(--glass)] p-6">
+          <div className="flex w-full max-w-md flex-col gap-4">
+            {/* Instant meeting — one click */}
+            <button
+              onClick={handleStartMeeting}
+              disabled={!myRoomId}
+              className="w-full rounded-2xl bg-[var(--accent)] px-6 py-5 text-center hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <span className="block text-lg font-bold text-white">Start Meeting</span>
+              <span className="block text-xs text-white/70">Link copied automatically</span>
+            </button>
+
+            {/* Divider */}
+            <div className="flex items-center gap-3">
+              <div className="flex-1 border-t border-[var(--line)]" />
+              <span className="text-xs text-[var(--muted)]">or</span>
+              <div className="flex-1 border-t border-[var(--line)]" />
+            </div>
+
+            {/* Go Available mode */}
+            <div className="flex w-full flex-col gap-3 rounded-2xl border border-[var(--line)] bg-[var(--glass)] p-5">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--muted)]">Your meeting link</span>
-                <button onClick={regenerateLink} className="rounded-lg border border-[var(--line)] px-2.5 py-1 text-[0.65rem] font-medium text-[var(--muted)] hover:border-[var(--line-strong)] hover:text-[var(--ink)]">Regenerate</button>
-              </div>
-              {myRoomId ? (
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 truncate rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-sm text-[var(--ink)]">{getMeetingLink(myRoomId)}</div>
-                  <button onClick={copyLink} className={`shrink-0 rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${copied ? 'bg-[var(--success)]/15 text-[var(--success)]' : 'bg-[var(--ink)] text-[var(--paper)] hover:opacity-90'}`}>{copied ? 'Copied!' : 'Copy'}</button>
+                <span className="text-sm font-semibold text-[var(--ink)]">Go Available</span>
+                <div className="flex items-center gap-1.5">
+                  {([10, 30, 60] as AvailabilityDuration[]).map((d) => (
+                    <button key={d} onClick={() => setAvailabilityDuration(d)} className={`rounded-md px-2 py-1 text-[0.65rem] font-semibold transition-colors ${availabilityDuration === d ? 'bg-[var(--accent)] text-white' : 'border border-[var(--line)] text-[var(--muted)] hover:text-[var(--ink)]'}`}>
+                      {d === 60 ? '1hr' : `${d}m`}
+                    </button>
+                  ))}
                 </div>
+              </div>
+              <p className="text-xs text-[var(--muted)]">Wait for someone to join. You'll get a push notification.</p>
+              <button onClick={handleGoAvailable} disabled={!myRoomId} className="w-full rounded-xl bg-[var(--success)] px-4 py-3 text-sm font-bold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50">Go Available</button>
+            </div>
+
+            {/* Link management */}
+            <div className="flex items-center gap-2 px-1">
+              {myRoomId ? (
+                <>
+                  <div className="flex-1 truncate rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-xs text-[var(--muted)]">{getMeetingLink(myRoomId)}</div>
+                  <button onClick={copyLink} className={`shrink-0 rounded-lg px-2.5 py-2 text-xs font-semibold transition-colors ${copied ? 'text-[var(--success)]' : 'text-[var(--muted)] hover:text-[var(--ink)]'}`}>{copied ? 'Copied!' : 'Copy'}</button>
+                  <button onClick={regenerateLink} className="shrink-0 rounded-lg px-2.5 py-2 text-xs text-[var(--muted)] hover:text-[var(--ink)]">New</button>
+                </>
               ) : (
-                <div className="h-10 animate-pulse rounded-lg bg-[var(--glass)]" />
+                <div className="h-8 flex-1 animate-pulse rounded-lg bg-[var(--glass)]" />
               )}
-              <p className="text-xs text-[var(--muted)]">Share this link with anyone to invite them to a video meeting.</p>
             </div>
-
-            <div className="flex w-full max-w-sm items-center justify-center gap-2">
-              <span className="text-xs text-[var(--muted)]">Available for:</span>
-              {([10, 30, 60] as AvailabilityDuration[]).map((d) => (
-                <button key={d} onClick={() => setAvailabilityDuration(d)} className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${availabilityDuration === d ? 'bg-[var(--accent)] text-white' : 'border border-[var(--line)] text-[var(--muted)] hover:border-[var(--line-strong)] hover:text-[var(--ink)]'}`}>
-                  {d === 60 ? '1hr' : `${d}m`}
-                </button>
-              ))}
-            </div>
-
-            <button onClick={handleGoAvailable} disabled={!myRoomId} className="w-full max-w-sm rounded-xl bg-[var(--accent)] px-6 py-4 text-lg font-bold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50">Go Available</button>
-            <button onClick={handleStartMeeting} disabled={!myRoomId} className="w-full max-w-sm rounded-xl border border-[var(--line-strong)] bg-[var(--glass)] px-6 py-3 text-sm font-semibold text-[var(--ink)] hover:bg-[var(--glass-hover)] disabled:cursor-not-allowed disabled:opacity-50">Start Meeting Now</button>
-          </>
+          </div>
         )}
       </div>
     </Shell>
