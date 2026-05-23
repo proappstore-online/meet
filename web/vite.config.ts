@@ -42,7 +42,7 @@ export default defineConfig({
       manifest: {
         name: 'Meet',
         short_name: 'Meet',
-        description: 'Instant 1-on-1 video meetings — part of FreeAppStore',
+        description: 'Instant 1-on-1 video meetings — part of ProAppStore',
         start_url: '/',
         display: 'standalone',
         background_color: '#ffffff',

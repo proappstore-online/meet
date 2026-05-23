@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { initApp } from '@freeappstore/sdk'
-import type { User, Room, ConnectionState } from '@freeappstore/sdk'
+import { initPro } from '@proappstore/sdk'
+import type { User, Room, ConnectionState, RoomPeer } from '@proappstore/sdk'
 import { Shell } from './components/Shell.tsx'
 import { VideoTile } from './components/VideoTile.tsx'
 import { useWebRTC } from './hooks/useWebRTC.ts'
@@ -9,7 +9,11 @@ import { createRawRoom } from './lib/raw-room.ts'
 
 declare const __BUILD_HASH__: string
 
-const fas = initApp({ appId: 'meet' })
+const app = initPro({ appId: 'meet' })
+
+type AvailabilityDuration = 10 | 30 | 60
+
+type LobbyMode = 'idle' | 'available' | 'guest-waiting'
 
 function ConnectionBadge({ state }: { state: ConnectionState }) {
   const color =
@@ -25,6 +29,30 @@ function ConnectionBadge({ state }: { state: ConnectionState }) {
   )
 }
 
+function CountdownTimer({ endsAt, onExpired }: { endsAt: number; onExpired: () => void }) {
+  const [remaining, setRemaining] = useState(() => Math.max(0, Math.ceil((endsAt - Date.now()) / 1000)))
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const left = Math.max(0, Math.ceil((endsAt - Date.now()) / 1000))
+      setRemaining(left)
+      if (left <= 0) {
+        clearInterval(interval)
+        onExpired()
+      }
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [endsAt, onExpired])
+
+  const mins = Math.floor(remaining / 60)
+  const secs = remaining % 60
+  return (
+    <span className="font-mono text-2xl font-bold text-[var(--ink)]">
+      {String(mins).padStart(2, '0')}:{String(secs).padStart(2, '0')}
+    </span>
+  )
+}
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null)
   const [authReady, setAuthReady] = useState(false)
@@ -35,7 +63,15 @@ export default function App() {
   const [copied, setCopied] = useState(false)
   const [isHost, setIsHost] = useState(false)
 
+  // Availability mode state
+  const [lobbyMode, setLobbyMode] = useState<LobbyMode>('idle')
+  const [availabilityDuration, setAvailabilityDuration] = useState<AvailabilityDuration>(30)
+  const [availabilityEndsAt, setAvailabilityEndsAt] = useState<number | null>(null)
+  const [guestJoined, setGuestJoined] = useState(false)
+  const [guestTimeout, setGuestTimeout] = useState(false)
+
   const roomRef = useRef<Room | null>(null)
+  const availPeersUnsubRef = useRef<(() => void) | null>(null)
 
   const {
     localStream, remoteStream, callState,
@@ -44,21 +80,21 @@ export default function App() {
   } = useWebRTC(isHost)
 
   useEffect(() => {
-    fas.auth.init().then(() => setAuthReady(true))
-    const unsub = fas.auth.onChange(setUser)
+    app.auth.init().then(() => setAuthReady(true))
+    const unsub = app.auth.onChange(setUser)
     return unsub
   }, [])
 
   useEffect(() => {
     if (!user) { setMyRoomId(null); return }
     const controller = new AbortController()
-    fas.kv.get<string>('my-room-id', { signal: controller.signal }).then((id) => {
+    app.kv.get<string>('my-room-id', { signal: controller.signal }).then((id) => {
       if (controller.signal.aborted) return
       if (id) {
         setMyRoomId(id)
       } else {
         const newId = generateRoomId()
-        fas.kv.set('my-room-id', newId).then(() => {
+        app.kv.set('my-room-id', newId).then(() => {
           if (!controller.signal.aborted) setMyRoomId(newId)
         })
       }
@@ -71,7 +107,7 @@ export default function App() {
   const regenerateLink = useCallback(async () => {
     if (!user) return
     const newId = generateRoomId()
-    await fas.kv.set('my-room-id', newId)
+    await app.kv.set('my-room-id', newId)
     setMyRoomId(newId)
     setCopied(false)
   }, [user])
@@ -90,7 +126,7 @@ export default function App() {
     setActiveRoomId(roomId)
 
     const roomName = `meet-${roomId}`
-    const token = fas.auth.token
+    const token = app.auth.token
     if (!token) return
 
     const logFn = (msg: string) => console.log(`[meet] ${msg}`)
@@ -101,15 +137,148 @@ export default function App() {
     r.onConnectionState((state: ConnectionState) => setRoomState(state))
   }, [])
 
+  // --- Availability mode: host goes available (no cameras yet) ---
+  const handleGoAvailable = useCallback(async () => {
+    if (!myRoomId || !user) return
+
+    // Request push permission + subscribe
+    try {
+      await app.notifications.subscribe('/push-sw.js')
+    } catch {
+      // User may deny — still proceed (they just won't get push)
+      console.warn('[meet] Push subscription failed or denied')
+    }
+
+    // Join the room (no cameras)
+    const roomName = `meet-${myRoomId}`
+    const token = app.auth.token
+    if (!token) return
+
+    if (roomRef.current) roomRef.current.close()
+    setIsHost(true)
+
+    const logFn = (msg: string) => console.log(`[meet] ${msg}`)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const r = createRawRoom('meet', roomName, token, logFn) as any
+    roomRef.current = r
+
+    // Listen for peers joining (guest arrival)
+    availPeersUnsubRef.current = r.onPeers((peers: RoomPeer[]) => {
+      // Filter out self — if there's another peer, guest has joined
+      const others = peers.filter((p: RoomPeer) => p.uid !== user.id)
+      if (others.length > 0) {
+        setGuestJoined(true)
+      }
+    })
+
+    r.onConnectionState((state: ConnectionState) => setRoomState(state))
+
+    setLobbyMode('available')
+    setAvailabilityEndsAt(Date.now() + availabilityDuration * 60 * 1000)
+    setGuestJoined(false)
+  }, [myRoomId, user, availabilityDuration])
+
+  const handleCancelAvailability = useCallback(() => {
+    if (availPeersUnsubRef.current) { availPeersUnsubRef.current(); availPeersUnsubRef.current = null }
+    if (roomRef.current) { roomRef.current.close(); roomRef.current = null }
+    setLobbyMode('idle')
+    setAvailabilityEndsAt(null)
+    setGuestJoined(false)
+    setRoomState('closed')
+  }, [])
+
+  const handleAvailabilityExpired = useCallback(() => {
+    handleCancelAvailability()
+  }, [handleCancelAvailability])
+
+  // Host clicks "Start Call" after guest arrives
+  const handleStartCallFromAvailable = useCallback(() => {
+    if (!myRoomId || !roomRef.current) return
+    // Clean up availability peers listener
+    if (availPeersUnsubRef.current) { availPeersUnsubRef.current(); availPeersUnsubRef.current = null }
+
+    setActiveRoomId(myRoomId)
+    setLobbyMode('idle')
+    setAvailabilityEndsAt(null)
+
+    // Now wire up WebRTC message handling on the existing room
+    setRoom(roomRef.current)
+    roomRef.current.onConnectionState((state: ConnectionState) => setRoomState(state))
+  }, [myRoomId, setRoom])
+
+  // --- Direct start meeting (old flow) ---
   const handleStartMeeting = useCallback(() => {
     if (!myRoomId || !user) return
     joinRoom(myRoomId, true)
   }, [myRoomId, user, joinRoom])
 
-  const handleJoinMeeting = useCallback(() => {
+  // --- Guest flow ---
+  const handleJoinMeeting = useCallback(async () => {
     if (!urlRoomId || !user) return
-    joinRoom(urlRoomId, false)
-  }, [urlRoomId, user, joinRoom])
+
+    setLobbyMode('guest-waiting')
+    setGuestTimeout(false)
+
+    // Join the room
+    const roomName = `meet-${urlRoomId}`
+    const token = app.auth.token
+    if (!token) return
+
+    if (roomRef.current) roomRef.current.close()
+    setIsHost(false)
+
+    const logFn = (msg: string) => console.log(`[meet] ${msg}`)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const r = createRawRoom('meet', roomName, token, logFn) as any
+    roomRef.current = r
+
+    r.onConnectionState((state: ConnectionState) => setRoomState(state))
+
+    // When we see the host in peers, send them a push notification
+    let notified = false
+    const unsubPeers = r.onPeers(async (peers: RoomPeer[]) => {
+      if (notified) return
+      const host = peers.find((p: RoomPeer) => p.uid !== user.id)
+      if (host) {
+        notified = true
+        try {
+          await app.notifications.notifyUser(host.uid, {
+            title: 'Meet',
+            body: `${user.login || 'Someone'} wants to talk!`,
+            url: getMeetingLink(urlRoomId),
+            tag: `meet-${urlRoomId}`,
+          })
+          console.log('[meet] Push notification sent to host')
+        } catch (e) {
+          console.warn('[meet] Failed to send push notification:', e)
+        }
+      }
+    })
+
+    // 2-minute timeout — if host doesn't start the call
+    const timeout = setTimeout(() => {
+      setGuestTimeout(true)
+    }, 120_000)
+
+    // Store cleanup refs — we'll clean these up when transitioning to active call
+    const cleanup = () => {
+      unsubPeers()
+      clearTimeout(timeout)
+    }
+
+    // Don't set active room yet — wait for WebRTC offer from host
+    // Listen for messages; when we get an offer, transition to active call
+    const unsubMsg = r.onMessage((msg: { data: { type?: string } }) => {
+      if (msg.data?.type === 'request-offer' || msg.data?.type === 'offer') {
+        // Host has started their cameras — transition to active call
+        cleanup()
+        unsubMsg()
+        setLobbyMode('idle')
+        setActiveRoomId(urlRoomId)
+        setRoom(r)
+      }
+    })
+  }, [urlRoomId, user, setRoom])
 
   useEffect(() => {
     if (roomState === 'open' && callState === 'idle' && activeRoomId) {
@@ -119,15 +288,22 @@ export default function App() {
 
   const handleEndMeeting = useCallback(() => {
     endCall()
+    if (availPeersUnsubRef.current) { availPeersUnsubRef.current(); availPeersUnsubRef.current = null }
     if (roomRef.current) { roomRef.current.close(); roomRef.current = null }
     setRoom(null)
     setActiveRoomId(null)
     setRoomState('closed')
+    setLobbyMode('idle')
+    setGuestJoined(false)
+    setAvailabilityEndsAt(null)
     if (urlRoomId) window.history.replaceState({}, '', window.location.pathname)
   }, [endCall, urlRoomId])
 
   useEffect(() => {
-    return () => { if (roomRef.current) roomRef.current.close() }
+    return () => {
+      if (availPeersUnsubRef.current) availPeersUnsubRef.current()
+      if (roomRef.current) roomRef.current.close()
+    }
   }, [])
 
   // --- Render ---
@@ -144,21 +320,21 @@ export default function App() {
 
   if (!user) {
     return (
-      <Shell user={null} onSignIn={(p) => fas.auth.signIn(p)}>
+      <Shell user={null} onSignIn={(p) => app.auth.signIn(p)}>
         <div className="flex flex-1 flex-col items-center justify-center gap-5">
           <h1 className="display-font text-4xl font-bold text-[var(--ink)]">Meet</h1>
           <p className="max-w-xs text-center text-[var(--muted)]">
-            Instant 1-on-1 video meetings. Sign in to create your personal meeting link.
+            Instant 1-on-1 video meetings with push notifications. Sign in to get started.
           </p>
           <div className="flex flex-col gap-3">
             <button
-              onClick={() => fas.auth.signIn('github')}
+              onClick={() => app.auth.signIn('github')}
               className="rounded-full bg-[var(--ink)] px-6 py-2.5 text-sm font-semibold text-[var(--paper)] hover:opacity-90"
             >
               Sign in with GitHub
             </button>
             <button
-              onClick={() => fas.auth.signIn('google')}
+              onClick={() => app.auth.signIn('google')}
               className="rounded-full border border-[var(--line-strong)] bg-[var(--glass)] px-6 py-2.5 text-sm font-semibold text-[var(--ink)] hover:bg-[var(--glass-hover)]"
             >
               Sign in with Google
@@ -234,11 +410,126 @@ export default function App() {
     )
   }
 
+  // --- Guest waiting screen ---
+  if (lobbyMode === 'guest-waiting' && urlRoomId) {
+    return (
+      <Shell user={user} onSignIn={(p) => app.auth.signIn(p)} onSignOut={() => app.auth.signOut()}>
+        <div className="flex flex-1 flex-col items-center justify-center gap-6 py-8">
+          <h1 className="display-font text-3xl font-bold text-[var(--ink)]">Joining Meeting</h1>
+          <div className="flex w-full max-w-sm flex-col items-center gap-5 rounded-2xl border border-[var(--line)] bg-[var(--glass)] p-6">
+            {guestTimeout ? (
+              <>
+                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[var(--error)]/15">
+                  <svg className="h-8 w-8 text-[var(--error)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                  </svg>
+                </div>
+                <p className="text-center text-sm text-[var(--muted)]">
+                  The host hasn't responded. They may not be available right now.
+                </p>
+                <button
+                  onClick={() => {
+                    if (roomRef.current) { roomRef.current.close(); roomRef.current = null }
+                    setLobbyMode('idle')
+                    setGuestTimeout(false)
+                    setRoomState('closed')
+                    window.history.replaceState({}, '', window.location.pathname)
+                  }}
+                  className="w-full rounded-xl border border-[var(--line-strong)] bg-[var(--glass)] px-6 py-3 text-sm font-semibold text-[var(--ink)] hover:bg-[var(--glass-hover)]"
+                >
+                  Go Back
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[var(--accent)]/15">
+                  <svg className="h-8 w-8 animate-pulse text-[var(--accent)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0" />
+                  </svg>
+                </div>
+                <p className="text-center text-sm font-medium text-[var(--ink)]">
+                  Host has been notified
+                </p>
+                <p className="text-center text-xs text-[var(--muted)]">
+                  Please wait while the host starts the call...
+                </p>
+                <div className="flex items-center gap-2">
+                  <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-[var(--accent)] [animation-delay:0ms]" />
+                  <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-[var(--accent)] [animation-delay:150ms]" />
+                  <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-[var(--accent)] [animation-delay:300ms]" />
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </Shell>
+    )
+  }
+
+  // --- Host availability screen ---
+  if (lobbyMode === 'available' && availabilityEndsAt && myRoomId) {
+    return (
+      <Shell user={user} onSignIn={(p) => app.auth.signIn(p)} onSignOut={() => app.auth.signOut()}>
+        <div className="flex flex-1 flex-col items-center justify-center gap-6 py-8">
+          <h1 className="display-font text-3xl font-bold text-[var(--ink)]">Available</h1>
+          <div className="flex w-full max-w-sm flex-col items-center gap-5 rounded-2xl border border-[var(--line)] bg-[var(--glass)] p-6">
+            {guestJoined ? (
+              <>
+                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[var(--success)]/15">
+                  <svg className="h-8 w-8 text-[var(--success)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
+                  </svg>
+                </div>
+                <p className="text-center text-sm font-medium text-[var(--ink)]">
+                  Someone is waiting to talk!
+                </p>
+                <button
+                  onClick={handleStartCallFromAvailable}
+                  className="w-full rounded-xl bg-[var(--success)] px-6 py-3.5 text-base font-bold text-white hover:opacity-90"
+                >
+                  Start Call
+                </button>
+              </>
+            ) : (
+              <>
+                <CountdownTimer endsAt={availabilityEndsAt} onExpired={handleAvailabilityExpired} />
+                <p className="text-center text-xs text-[var(--muted)]">
+                  Share your link. You'll be notified when someone joins.
+                </p>
+                <div className="flex w-full items-center gap-2">
+                  <div className="flex-1 truncate rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-sm text-[var(--ink)]">
+                    {getMeetingLink(myRoomId)}
+                  </div>
+                  <button
+                    onClick={copyLink}
+                    className={`shrink-0 rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
+                      copied
+                        ? 'bg-[var(--success)]/15 text-[var(--success)]'
+                        : 'bg-[var(--ink)] text-[var(--paper)] hover:opacity-90'
+                    }`}
+                  >
+                    {copied ? 'Copied!' : 'Copy'}
+                  </button>
+                </div>
+              </>
+            )}
+            <button
+              onClick={handleCancelAvailability}
+              className="w-full rounded-xl border border-[var(--line-strong)] bg-[var(--glass)] px-6 py-3 text-sm font-semibold text-[var(--muted)] hover:bg-[var(--glass-hover)] hover:text-[var(--ink)]"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </Shell>
+    )
+  }
+
   // Lobby
   const isJoining = !!urlRoomId
 
   return (
-    <Shell user={user} onSignIn={(p) => fas.auth.signIn(p)} onSignOut={() => fas.auth.signOut()}>
+    <Shell user={user} onSignIn={(p) => app.auth.signIn(p)} onSignOut={() => app.auth.signOut()}>
       <div className="flex flex-1 flex-col items-center justify-center gap-8 py-8">
         <h1 className="display-font text-4xl font-bold text-[var(--ink)]">Meet</h1>
 
@@ -293,12 +584,38 @@ export default function App() {
               </p>
             </div>
 
+            {/* Duration picker */}
+            <div className="flex w-full max-w-sm items-center justify-center gap-2">
+              <span className="text-xs text-[var(--muted)]">Available for:</span>
+              {([10, 30, 60] as AvailabilityDuration[]).map((d) => (
+                <button
+                  key={d}
+                  onClick={() => setAvailabilityDuration(d)}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
+                    availabilityDuration === d
+                      ? 'bg-[var(--accent)] text-white'
+                      : 'border border-[var(--line)] text-[var(--muted)] hover:border-[var(--line-strong)] hover:text-[var(--ink)]'
+                  }`}
+                >
+                  {d === 60 ? '1hr' : `${d}m`}
+                </button>
+              ))}
+            </div>
+
             <button
-              onClick={handleStartMeeting}
+              onClick={handleGoAvailable}
               disabled={!myRoomId}
               className="w-full max-w-sm rounded-xl bg-[var(--accent)] px-6 py-4 text-lg font-bold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Start Meeting
+              Go Available
+            </button>
+
+            <button
+              onClick={handleStartMeeting}
+              disabled={!myRoomId}
+              className="w-full max-w-sm rounded-xl border border-[var(--line-strong)] bg-[var(--glass)] px-6 py-3 text-sm font-semibold text-[var(--ink)] hover:bg-[var(--glass-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Start Meeting Now
             </button>
           </>
         )}

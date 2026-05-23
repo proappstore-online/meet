@@ -14,9 +14,9 @@ importers:
 
   web:
     dependencies:
-      '@freeappstore/sdk':
-        specifier: ^0.10.0
-        version: 0.10.0(react@19.2.6)
+      '@proappstore/sdk':
+        specifier: ^1.15.0
+        version: 1.16.0(react@19.2.6)
       react:
         specifier: ^19.2.5
         version: 19.2.6
@@ -637,8 +637,8 @@ packages:
       '@noble/hashes':
         optional: true
 
-  '@freeappstore/sdk@0.10.0':
-    resolution: {integrity: sha512-JbHT8BQv63bIR8fxPG9DQ8MhErn/VkINQOA1YqrYUZ0IhQ8lbiM5/ZKlJOYgwGf3qFKXG/d1ln/hC84o7U6U4Q==}
+  '@freeappstore/sdk@0.8.0':
+    resolution: {integrity: sha512-eyA70zz0o+q4yPUFeYbQQEz0eAkmwkjyBMexXIM5YM8FT+AiEKZ8UmS7WpHgit2mtnKVWMI5YXUNSr/QY2Vd2w==}
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
     peerDependenciesMeta:
@@ -676,6 +676,14 @@ packages:
 
   '@oxc-project/types@0.132.0':
     resolution: {integrity: sha512-FESMOxil5Se014ui/Eq8fT5uHJo6nIRwH0PfJrZJXs6Gek3ZVFOrpUv3YIZT20m+extU98Hg1Ym72U58rlsxUQ==}
+
+  '@proappstore/sdk@1.16.0':
+    resolution: {integrity: sha512-VmkstCaVaXcIxnq2bGmnIRFLNVpxKPjiy2RrSPdlkZEznWTN/KF88jB94J0cAdnodCUY3jHYwrgwPd0GxIy8HA==}
+    peerDependencies:
+      react: ^18.0.0 || ^19.0.0
+    peerDependenciesMeta:
+      react:
+        optional: true
 
   '@rolldown/binding-android-arm64@1.0.2':
     resolution: {integrity: sha512-ZS4D1JPGn/MYQN/SYDWftIE/nVsM8j/AFOYEzAoOE2O3NktQOZru+/vYXGbR/qtdLdIfGCP0lcoJiYVzsEz+iQ==}
@@ -3098,7 +3106,7 @@ snapshots:
 
   '@exodus/bytes@1.15.1': {}
 
-  '@freeappstore/sdk@0.10.0(react@19.2.6)':
+  '@freeappstore/sdk@0.8.0(react@19.2.6)':
     optionalDependencies:
       react: 19.2.6
 
@@ -3136,6 +3144,12 @@ snapshots:
     optional: true
 
   '@oxc-project/types@0.132.0': {}
+
+  '@proappstore/sdk@1.16.0(react@19.2.6)':
+    dependencies:
+      '@freeappstore/sdk': 0.8.0(react@19.2.6)
+    optionalDependencies:
+      react: 19.2.6
 
   '@rolldown/binding-android-arm64@1.0.2':
     optional: true

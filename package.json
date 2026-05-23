@@ -12,7 +12,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/freeappstore-online/meet.git"
+    "url": "git+https://github.com/proappstore-online/meet.git"
   },
   "scripts": {
     "dev": "pnpm --filter @meet/web dev",

@@ -58,7 +58,7 @@ describe('getRoomIdFromUrl', () => {
   beforeEach(() => {
     // Reset URL
     Object.defineProperty(window, 'location', {
-      value: { search: '', origin: 'https://meet.freeappstore.online' },
+      value: { search: '', origin: 'https://meet.proappstore.online' },
       writable: true,
       configurable: true,
     })
@@ -98,11 +98,11 @@ describe('getRoomIdFromUrl', () => {
 describe('getMeetingLink', () => {
   it('builds the correct meeting link', () => {
     Object.defineProperty(window, 'location', {
-      value: { origin: 'https://meet.freeappstore.online' },
+      value: { origin: 'https://meet.proappstore.online' },
       writable: true,
       configurable: true,
     })
-    expect(getMeetingLink('abc123')).toBe('https://meet.freeappstore.online?room=abc123')
+    expect(getMeetingLink('abc123')).toBe('https://meet.proappstore.online?room=abc123')
   })
 
   it('works on localhost', () => {

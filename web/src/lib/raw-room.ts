@@ -3,7 +3,7 @@
  * Same protocol as the SDK, but with full visibility into what's happening.
  */
 
-import type { RoomMessage, RoomPeer, ConnectionState } from '@freeappstore/sdk'
+import type { RoomMessage, RoomPeer, ConnectionState } from '@proappstore/sdk'
 
 type Unsubscribe = () => void
 
@@ -40,7 +40,7 @@ export function createRawRoom(
 
   function connect() {
     if (closed) return
-    const url = new URL(`/v1/apps/${appId}/rooms/${roomId}`, 'wss://api.freeappstore.online')
+    const url = new URL(`/v1/apps/${appId}/rooms/${roomId}`, 'wss://api.proappstore.online')
     url.searchParams.set('token', token)
     log(`raw-room: connecting to ${url.pathname}`)
     setState('connecting')

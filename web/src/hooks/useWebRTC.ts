@@ -1,5 +1,5 @@
 import { useRef, useState, useCallback, useEffect } from 'react'
-import type { Room, RoomMessage } from '@freeappstore/sdk'
+import type { Room, RoomMessage } from '@proappstore/sdk'
 
 const ICE_SERVERS: RTCConfiguration = {
   iceServers: [

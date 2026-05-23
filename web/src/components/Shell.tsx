@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import type { User } from '@freeappstore/sdk'
+import type { User } from '@proappstore/sdk'
 
 interface ShellProps {
   children: ReactNode
@@ -62,12 +62,12 @@ export function Shell({ children, user, onSignIn, onSignOut }: ShellProps) {
             <div className="mt-auto text-[0.65rem] text-[var(--muted)]">
               Part of{' '}
               <a
-                href="https://freeappstore.online"
+                href="https://proappstore.online"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="underline hover:text-[var(--ink)]"
               >
-                FreeAppStore
+                ProAppStore
               </a>
             </div>
           </aside>
@@ -121,12 +121,12 @@ export function Shell({ children, user, onSignIn, onSignOut }: ShellProps) {
       <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--line)] bg-[var(--dock)]/92 px-2 pb-[calc(env(safe-area-inset-bottom)+0.25rem)] pt-1 backdrop-blur-2xl lg:hidden">
         <div className="mx-auto grid max-w-xs grid-cols-1 py-2">
           <a
-            href="https://freeappstore.online"
+            href="https://proappstore.online"
             target="_blank"
             rel="noopener noreferrer"
             className="text-center text-[0.65rem] font-bold uppercase tracking-[0.14em] text-[var(--muted)]"
           >
-            Part of FreeAppStore
+            Part of ProAppStore
           </a>
         </div>
       </nav>
