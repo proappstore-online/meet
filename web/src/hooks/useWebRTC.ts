@@ -144,10 +144,10 @@ export function useWebRTC(room: Room | null, isHost: boolean) {
     log(`added ${stream.getTracks().length} local tracks to PC`)
 
     if (isHost) {
-      const offer = await pc.createOffer()
-      await pc.setLocalDescription(offer)
-      room.send<SignalMessage>({ type: 'offer', sdp: offer.sdp! })
-      log('sent initial offer')
+      // Don't send an offer yet — wait for the guest's request-offer.
+      // Sending eagerly here races with the peers-change and request-offer
+      // paths, causing SDP mismatches.
+      log('host ready, waiting for guest request-offer')
       setCallState('waiting')
     } else {
       room.send<SignalMessage>({ type: 'request-offer' })
@@ -170,7 +170,8 @@ export function useWebRTC(room: Room | null, isHost: boolean) {
 
   // Handle incoming signaling messages
   useEffect(() => {
-    if (!room) return
+    if (!room) { log('onMessage effect: no room'); return }
+    log(`onMessage effect: subscribing (room.state=${room.state})`)
 
     const unsub = room.onMessage<SignalMessage>((msg: RoomMessage<SignalMessage>) => {
       const data = msg.data
@@ -244,34 +245,20 @@ export function useWebRTC(room: Room | null, isHost: boolean) {
       })()
     })
 
-    return unsub
+    return () => {
+      log('onMessage effect: unsubscribing')
+      unsub()
+    }
   }, [room, createPeerConnection, flushCandidates, acquireMedia, log])
 
-  // Host re-offers on peer list change
+  // Log peer list changes (no re-offer — guest request-offer handles it)
   useEffect(() => {
-    if (!room || !isHost) return
-
+    if (!room) return
     const unsub = room.onPeers((peers) => {
-      log(`peers update: ${peers.map(p => p.login).join(', ') || '(empty)'}`)
-      if (!pcRef.current || !localStreamRef.current) return
-      ;(async () => {
-        try {
-          const pc = pcRef.current
-          if (!pc || pc.signalingState === 'closed') return
-          if (pc.connectionState === 'connected') return
-          log('re-offering due to peers change')
-          const offer = await pc.createOffer()
-          await pc.setLocalDescription(offer)
-          room.send<SignalMessage>({ type: 'offer', sdp: offer.sdp! })
-          log('sent offer (peers change)')
-        } catch (e) {
-          log(`peers re-offer error: ${e}`)
-        }
-      })()
+      log(`peers: [${peers.map(p => p.login).join(', ')}]`)
     })
-
     return unsub
-  }, [room, isHost, log])
+  }, [room, log])
 
   const toggleAudio = useCallback(() => {
     if (localStreamRef.current) {

@@ -116,12 +116,14 @@ export default function App() {
     setIsHost(asHost)
     setActiveRoomId(roomId)
 
-    const r = fas.rooms.join(`meet-${roomId}`)
+    const roomName = `meet-${roomId}`
+    console.log(`[meet] joining room: ${roomName} as ${asHost ? 'HOST' : 'GUEST'}`)
+    const r = fas.rooms.join(roomName)
     roomRef.current = r
     setRoom(r)
 
     r.onConnectionState((state) => {
-      console.log(`[meet] room state: ${state}`)
+      console.log(`[meet] room ${roomName} state: ${state}`)
       setRoomState(state)
     })
   }, [])
