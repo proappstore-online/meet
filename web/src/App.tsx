@@ -221,159 +221,139 @@ export default function App() {
     )
   }
 
-  // Active meeting
+  // Active meeting — full-screen on mobile, no shell chrome
   if (activeRoomId) {
     return (
-      <Shell user={user} onSignIn={(p) => fas.auth.signIn(p)} onSignOut={() => fas.auth.signOut()}>
-        <div className="flex flex-1 flex-col gap-4 py-4">
-          {/* Header */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <h1 className="display-font text-xl font-bold text-[var(--ink)]">Meeting</h1>
-              <span className="rounded-lg bg-[var(--glass)] px-2 py-0.5 font-mono text-xs text-[var(--muted)]">{activeRoomId}</span>
-              <ConnectionBadge state={roomState} />
-            </div>
-            <div className="flex items-center gap-2">
-              {callState !== 'idle' && (
-                <span className={`rounded-full px-3 py-1 text-xs font-medium ${
-                  callState === 'error' || callState === 'peer-left'
-                    ? 'bg-[var(--error)]/15 text-[var(--error)]'
-                    : callState === 'connected'
-                    ? 'bg-[var(--success)]/15 text-[var(--success)]'
-                    : 'bg-[var(--warning)]/15 text-[var(--warning)]'
-                }`}>
-                  {callState === 'waiting' ? 'Waiting for peer...' :
-                   callState === 'connecting' ? 'Connecting...' :
-                   callState === 'error' ? 'Camera/mic error' :
-                   callState === 'peer-left' ? 'Peer disconnected' :
-                   'Connected'}
-                </span>
-              )}
-              <button
-                onClick={copyLink}
-                className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-                  copied
-                    ? 'border-[var(--success)]/30 bg-[var(--success)]/15 text-[var(--success)]'
-                    : 'border-[var(--line-strong)] bg-[var(--glass)] text-[var(--muted)] hover:text-[var(--ink)]'
-                }`}
-                title={getMeetingLink(activeRoomId)}
-              >
-                {copied ? 'Copied!' : 'Copy link'}
-              </button>
-            </div>
+      <div className="relative flex h-[100dvh] flex-col bg-black">
+        {/* Video area */}
+        <div className="relative flex-1">
+          {/* Remote video — full area */}
+          <VideoTile
+            stream={remoteStream}
+            label={callState === 'peer-left' ? 'Disconnected' : 'Peer'}
+            fill
+          />
+
+          {/* Local video — PIP overlay */}
+          <div className="absolute right-3 top-3 z-10 w-24 overflow-hidden rounded-xl border-2 border-white/20 shadow-lg sm:w-36">
+            <VideoTile stream={localStream} muted mirrored label="You" />
           </div>
 
-          {/* Error / peer-left banner */}
+          {/* Status bar */}
+          <div className="absolute left-3 top-3 z-10 flex items-center gap-2">
+            <ConnectionBadge state={roomState} />
+            {callState !== 'idle' && callState !== 'connected' && (
+              <span className={`rounded-full px-2 py-0.5 text-[0.6rem] font-medium backdrop-blur-sm ${
+                callState === 'error' || callState === 'peer-left'
+                  ? 'bg-red-500/20 text-red-300'
+                  : 'bg-yellow-500/20 text-yellow-300'
+              }`}>
+                {callState === 'waiting' ? 'Waiting...' :
+                 callState === 'connecting' ? 'Connecting...' :
+                 callState === 'error' ? 'Camera error' :
+                 'Peer left'}
+              </span>
+            )}
+          </div>
+
+          {/* Error banner */}
           {callState === 'error' && (
-            <div className="flex items-center justify-between rounded-xl border border-[var(--error)]/30 bg-[var(--error)]/10 px-4 py-3">
-              <span className="text-sm text-[var(--error)]">Could not access camera or microphone. Check browser permissions.</span>
-              <button
-                onClick={startCall}
-                className="shrink-0 rounded-lg bg-[var(--error)] px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90"
-              >
-                Retry
-              </button>
+            <div className="absolute inset-x-3 top-14 z-10 flex items-center justify-between rounded-xl bg-red-500/90 px-4 py-2 backdrop-blur-sm">
+              <span className="text-xs text-white">Camera/mic blocked</span>
+              <button onClick={startCall} className="rounded-lg bg-white/20 px-3 py-1 text-xs font-semibold text-white">Retry</button>
             </div>
-          )}
-          {callState === 'peer-left' && (
-            <div className="flex items-center justify-center rounded-xl border border-[var(--warning)]/30 bg-[var(--warning)]/10 px-4 py-3">
-              <span className="text-sm text-[var(--warning)]">The other person disconnected. They can rejoin using the same link.</span>
-            </div>
-          )}
-
-          {/* Video grid */}
-          <div className="grid flex-1 grid-cols-1 gap-4 sm:grid-cols-2">
-            <VideoTile
-              stream={localStream}
-              muted
-              mirrored
-              label="You"
-            />
-            <VideoTile
-              stream={remoteStream}
-              label={callState === 'peer-left' ? 'Disconnected' : 'Peer'}
-            />
-          </div>
-
-          {/* Controls */}
-          <div className="flex items-center justify-center gap-3 py-2">
-            <button
-              onClick={toggleAudio}
-              className={`flex h-12 w-12 items-center justify-center rounded-full border transition-colors ${
-                audioEnabled
-                  ? 'border-[var(--line-strong)] bg-[var(--glass)] text-[var(--ink)] hover:bg-[var(--glass-hover)]'
-                  : 'border-[var(--error)]/30 bg-[var(--error)]/15 text-[var(--error)]'
-              }`}
-              title={audioEnabled ? 'Mute microphone' : 'Unmute microphone'}
-            >
-              {audioEnabled ? (
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 0 0 6-6v-1.5m-6 7.5a6 6 0 0 1-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 0 1-3-3V4.5a3 3 0 1 1 6 0v8.25a3 3 0 0 1-3 3Z" />
-                </svg>
-              ) : (
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="m18.364 18.364-2.172-2.172M15.536 15.536 12 12m0 0L8.464 8.464M12 12l3.536-3.536M12 12 8.464 15.536m-2.172 2.172L4.93 19.07M12 18.75a6 6 0 0 0 4.243-1.757M12 18.75a6 6 0 0 1-4.243-1.757M12 18.75v3.75m-3.75 0h7.5M3 3l18 18" />
-                </svg>
-              )}
-            </button>
-
-            <button
-              onClick={toggleVideo}
-              className={`flex h-12 w-12 items-center justify-center rounded-full border transition-colors ${
-                videoEnabled
-                  ? 'border-[var(--line-strong)] bg-[var(--glass)] text-[var(--ink)] hover:bg-[var(--glass-hover)]'
-                  : 'border-[var(--error)]/30 bg-[var(--error)]/15 text-[var(--error)]'
-              }`}
-              title={videoEnabled ? 'Turn off camera' : 'Turn on camera'}
-            >
-              {videoEnabled ? (
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9.75a2.25 2.25 0 0 0 2.25-2.25V7.5a2.25 2.25 0 0 0-2.25-2.25H4.5A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" />
-                </svg>
-              ) : (
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M12 18.75H4.5a2.25 2.25 0 0 1-2.25-2.25V9m12.841 9.091L16.5 19.5m-1.409-.409L12 15.75M2.25 9V7.5a2.25 2.25 0 0 1 2.25-2.25h9.75M3 3l18 18" />
-                </svg>
-              )}
-            </button>
-
-            <button
-              onClick={handleEndMeeting}
-              className="flex h-12 w-20 items-center justify-center rounded-full bg-[var(--error)] text-sm font-semibold text-white hover:opacity-90"
-            >
-              End
-            </button>
-          </div>
-
-          {/* Debug log */}
-          {logs.length > 0 && (
-            <details open className="rounded-xl border border-[var(--line)] bg-[var(--panel)]">
-              <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-[var(--muted)]">
-                Debug log ({logs.length})
-              </summary>
-              <div className="flex justify-end px-3">
-                <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(logs.join('\n'))
-                    alert('Logs copied!')
-                  }}
-                  className="rounded border border-[var(--line)] px-2 py-0.5 text-[0.6rem] font-medium text-[var(--muted)] hover:text-[var(--ink)]"
-                >
-                  Copy logs
-                </button>
-              </div>
-              <div className="px-3 py-1 font-mono text-[0.6rem] text-[var(--ink)] border-b border-[var(--line)]">
-                build: {__BUILD_HASH__} | room: meet-{activeRoomId} | role: {isHost ? 'HOST' : 'GUEST'} | ws: {roomState}
-              </div>
-              <div className="max-h-40 overflow-y-auto px-3 pb-2">
-                {logs.map((line, i) => (
-                  <div key={i} className="font-mono text-[0.6rem] leading-tight text-[var(--muted)]">{line}</div>
-                ))}
-              </div>
-            </details>
           )}
         </div>
-      </Shell>
+
+        {/* Controls bar */}
+        <div className="flex items-center justify-center gap-4 bg-black/80 px-4 py-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] backdrop-blur-xl">
+          {/* Mute */}
+          <button
+            onClick={toggleAudio}
+            className={`flex h-12 w-12 items-center justify-center rounded-full ${
+              audioEnabled ? 'bg-white/10 text-white' : 'bg-red-500/80 text-white'
+            }`}
+          >
+            {audioEnabled ? (
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 0 0 6-6v-1.5m-6 7.5a6 6 0 0 1-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 0 1-3-3V4.5a3 3 0 1 1 6 0v8.25a3 3 0 0 1-3 3Z" />
+              </svg>
+            ) : (
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="m18.364 18.364-2.172-2.172M15.536 15.536 12 12m0 0L8.464 8.464M12 12l3.536-3.536M12 12 8.464 15.536m-2.172 2.172L4.93 19.07M12 18.75a6 6 0 0 0 4.243-1.757M12 18.75a6 6 0 0 1-4.243-1.757M12 18.75v3.75m-3.75 0h7.5M3 3l18 18" />
+              </svg>
+            )}
+          </button>
+
+          {/* Camera */}
+          <button
+            onClick={toggleVideo}
+            className={`flex h-12 w-12 items-center justify-center rounded-full ${
+              videoEnabled ? 'bg-white/10 text-white' : 'bg-red-500/80 text-white'
+            }`}
+          >
+            {videoEnabled ? (
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9.75a2.25 2.25 0 0 0 2.25-2.25V7.5a2.25 2.25 0 0 0-2.25-2.25H4.5A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" />
+              </svg>
+            ) : (
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M12 18.75H4.5a2.25 2.25 0 0 1-2.25-2.25V9m12.841 9.091L16.5 19.5m-1.409-.409L12 15.75M2.25 9V7.5a2.25 2.25 0 0 1 2.25-2.25h9.75M3 3l18 18" />
+              </svg>
+            )}
+          </button>
+
+          {/* Copy link */}
+          <button
+            onClick={copyLink}
+            className={`flex h-12 w-12 items-center justify-center rounded-full ${
+              copied ? 'bg-green-500/80 text-white' : 'bg-white/10 text-white'
+            }`}
+          >
+            {copied ? (
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+              </svg>
+            ) : (
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m9.86-2.556a4.5 4.5 0 0 0-1.242-7.244l-4.5-4.5a4.5 4.5 0 0 0-6.364 6.364L4.5 8.813" />
+              </svg>
+            )}
+          </button>
+
+          {/* End call */}
+          <button
+            onClick={handleEndMeeting}
+            className="flex h-12 w-16 items-center justify-center rounded-full bg-red-500 text-white"
+          >
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 3.75 18 6m0 0 2.25 2.25M18 6l2.25-2.25M18 6l-2.25 2.25m1.5 13.5c-8.284 0-15-6.716-15-15V4.5A2.25 2.25 0 0 1 6.75 2.25h1.372c.516 0 .966.351 1.091.852l1.106 4.423c.11.44-.054.902-.417 1.173l-1.293.97a1.062 1.062 0 0 0-.38 1.21 12.035 12.035 0 0 0 7.143 7.143c.441.162.928-.004 1.21-.38l.97-1.293a1.125 1.125 0 0 1 1.173-.417l4.423 1.106c.5.125.852.575.852 1.091V19.5a2.25 2.25 0 0 1-2.25 2.25h-2.25Z" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Debug log — collapsed by default */}
+        {logs.length > 0 && (
+          <details className="absolute bottom-20 left-2 right-2 z-20 rounded-xl border border-white/10 bg-black/90 backdrop-blur-xl">
+            <summary className="cursor-pointer px-3 py-1.5 text-[0.6rem] font-semibold text-white/50">
+              {__BUILD_HASH__} | {isHost ? 'H' : 'G'} | {roomState}
+            </summary>
+            <div className="flex justify-end px-3">
+              <button
+                onClick={() => { navigator.clipboard.writeText(logs.join('\n')); alert('Copied!') }}
+                className="rounded border border-white/20 px-2 py-0.5 text-[0.6rem] text-white/50"
+              >
+                Copy
+              </button>
+            </div>
+            <div className="max-h-32 overflow-y-auto px-3 pb-2">
+              {logs.map((line, i) => (
+                <div key={i} className="font-mono text-[0.55rem] leading-tight text-white/40">{line}</div>
+              ))}
+            </div>
+          </details>
+        )}
+      </div>
     )
   }
 
