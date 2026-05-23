@@ -24,7 +24,11 @@ interface SignalCandidate {
   candidate: RTCIceCandidateInit
 }
 
-type SignalMessage = SignalOffer | SignalAnswer | SignalCandidate
+interface SignalRequestOffer {
+  type: 'request-offer'
+}
+
+type SignalMessage = SignalOffer | SignalAnswer | SignalCandidate | SignalRequestOffer
 
 export type CallState = 'idle' | 'waiting' | 'connecting' | 'connected' | 'error' | 'peer-left'
 
@@ -137,6 +141,8 @@ export function useWebRTC(room: Room | null, isHost: boolean) {
       room.send<SignalMessage>({ type: 'offer', sdp: offer.sdp! })
       setCallState('waiting')
     } else {
+      // Ask the host to (re)send their offer — we may have missed it.
+      room.send<SignalMessage>({ type: 'request-offer' })
       setCallState('connecting')
     }
     startingRef.current = false
@@ -181,6 +187,13 @@ export function useWebRTC(room: Room | null, isHost: boolean) {
             await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: data.sdp }))
             await flushCandidates()
             setCallState('connecting')
+          } else if (data.type === 'request-offer') {
+            // Guest is asking us to (re)send our offer.
+            const pc = pcRef.current
+            if (!pc || pc.connectionState === 'connected') return
+            const offer = await pc.createOffer()
+            await pc.setLocalDescription(offer)
+            room.send<SignalMessage>({ type: 'offer', sdp: offer.sdp! })
           } else if (data.type === 'candidate') {
             const pc = pcRef.current
             if (!pc) return
@@ -204,21 +217,21 @@ export function useWebRTC(room: Room | null, isHost: boolean) {
   useEffect(() => {
     if (!room || !isHost) return
 
-    const unsub = room.onPeers((peers) => {
-      if (peers.length > 1 && pcRef.current && localStreamRef.current) {
-        ;(async () => {
-          try {
-            const pc = pcRef.current
-            if (!pc || pc.signalingState === 'closed') return
-            if (pc.connectionState === 'connected') return
-            const offer = await pc.createOffer()
-            await pc.setLocalDescription(offer)
-            room.send<SignalMessage>({ type: 'offer', sdp: offer.sdp! })
-          } catch {
-            // Stale PC — next peer join will retry.
-          }
-        })()
-      }
+    const unsub = room.onPeers((_peers) => {
+      // A peer joined/left — if we're still waiting, re-send the offer.
+      if (!pcRef.current || !localStreamRef.current) return
+      ;(async () => {
+        try {
+          const pc = pcRef.current
+          if (!pc || pc.signalingState === 'closed') return
+          if (pc.connectionState === 'connected') return
+          const offer = await pc.createOffer()
+          await pc.setLocalDescription(offer)
+          room.send<SignalMessage>({ type: 'offer', sdp: offer.sdp! })
+        } catch {
+          // Stale PC — next peer join will retry.
+        }
+      })()
     })
 
     return unsub
