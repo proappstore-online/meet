@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { initApp } from '@freeappstore/sdk'
-import type { User, Room, ConnectionState } from '@freeappstore/sdk'
+import type { User, Room, RoomPeer, ConnectionState } from '@freeappstore/sdk'
 import { Shell } from './components/Shell.tsx'
 import { VideoTile } from './components/VideoTile.tsx'
 import { useWebRTC } from './hooks/useWebRTC.ts'
@@ -42,6 +42,19 @@ export default function App() {
   const [roomState, setRoomState] = useState<ConnectionState>('closed')
   const [copied, setCopied] = useState(false)
   const [isHost, setIsHost] = useState(false)
+
+  // Availability mode state
+  const [availableMode, setAvailableMode] = useState(false)
+  const [availableUntil, setAvailableUntil] = useState<number | null>(null)
+  const [availableDuration, setAvailableDuration] = useState(10) // minutes
+  const [guestWaiting, setGuestWaiting] = useState(false)
+  const [peerNames, setPeerNames] = useState<string[]>([])
+  const [countdown, setCountdown] = useState('')
+  const [guestWaitingForHost, setGuestWaitingForHost] = useState(false)
+  const [guestTimedOut, setGuestTimedOut] = useState(false)
+  const peerUnsubRef = useRef<(() => void) | null>(null)
+  const guestTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const notifiedRef = useRef(false)
 
   const roomRef = useRef<Room | null>(null)
 
@@ -149,15 +162,46 @@ export default function App() {
     joinRoom(urlRoomId, false)
   }, [urlRoomId, user, joinRoom])
 
-  /** Start the WebRTC call once the signaling room is open. */
-  useEffect(() => {
-    if (roomState === 'open' && callState === 'idle' && activeRoomId) {
-      startCall()
-    }
-  }, [roomState, callState, activeRoomId, startCall])
+  /** Go available as host — join room but don't start cameras. */
+  const handleGoAvailable = useCallback(() => {
+    if (!myRoomId || !user) return
 
-  /** End the meeting and clean up. */
-  const handleEndMeeting = useCallback(() => {
+    // Request notification permission
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission()
+    }
+
+    setAvailableMode(true)
+    setGuestWaiting(false)
+    setPeerNames([])
+    notifiedRef.current = false
+    setAvailableUntil(Date.now() + availableDuration * 60 * 1000)
+
+    joinRoom(myRoomId, true)
+  }, [myRoomId, user, availableDuration, joinRoom])
+
+  /** Host starts the actual call from available mode. */
+  const handleStartFromAvailable = useCallback(() => {
+    setAvailableMode(false)
+    setAvailableUntil(null)
+    setGuestWaiting(false)
+    if (peerUnsubRef.current) {
+      peerUnsubRef.current()
+      peerUnsubRef.current = null
+    }
+    startCall()
+  }, [startCall])
+
+  /** Cancel availability and leave room. */
+  const handleCancelAvailable = useCallback(() => {
+    setAvailableMode(false)
+    setAvailableUntil(null)
+    setGuestWaiting(false)
+    setPeerNames([])
+    if (peerUnsubRef.current) {
+      peerUnsubRef.current()
+      peerUnsubRef.current = null
+    }
     endCall()
     if (roomRef.current) {
       roomRef.current.close()
@@ -166,6 +210,119 @@ export default function App() {
     setRoom(null)
     setActiveRoomId(null)
     setRoomState('closed')
+  }, [endCall, setRoom])
+
+  /** Guest joins and waits for host to start cameras. */
+  const handleGuestJoinAvailable = useCallback(() => {
+    if (!urlRoomId || !user) return
+    setGuestWaitingForHost(true)
+    setGuestTimedOut(false)
+    joinRoom(urlRoomId, false)
+
+    // Start 2 minute timeout
+    if (guestTimeoutRef.current) clearTimeout(guestTimeoutRef.current)
+    guestTimeoutRef.current = setTimeout(() => {
+      setGuestTimedOut(true)
+    }, 2 * 60 * 1000)
+  }, [urlRoomId, user, joinRoom])
+
+  // Track peers in available mode (host) — subscribe to room's onPeers directly
+  useEffect(() => {
+    if (!availableMode || !roomRef.current) return
+    const room = roomRef.current
+    notifiedRef.current = false
+    const unsub = room.onPeers((peers: RoomPeer[]) => {
+      // Filter out self (the host)
+      const others = peers.filter(p => p.uid !== user?.id)
+      const names = others.map(p => p.login)
+      setPeerNames(names)
+
+      if (others.length > 0) {
+        setGuestWaiting(true)
+        if (!notifiedRef.current) {
+          notifiedRef.current = true
+          // Browser notification
+          if ('Notification' in window && Notification.permission === 'granted') {
+            new Notification('Meet', { body: 'Someone wants to talk!' })
+          }
+        }
+      } else {
+        setGuestWaiting(false)
+        notifiedRef.current = false
+      }
+    })
+    peerUnsubRef.current = unsub
+    return () => { unsub(); peerUnsubRef.current = null }
+  }, [availableMode, roomState, user?.id]) // re-run when roomState changes to 'open'
+
+  // Guest: detect when host starts cameras (receiving an offer triggers callState change)
+  useEffect(() => {
+    if (!guestWaitingForHost) return
+    if (callState === 'connecting' || callState === 'connected') {
+      setGuestWaitingForHost(false)
+      if (guestTimeoutRef.current) {
+        clearTimeout(guestTimeoutRef.current)
+        guestTimeoutRef.current = null
+      }
+    }
+  }, [guestWaitingForHost, callState])
+
+  // Countdown timer for available mode
+  useEffect(() => {
+    if (!availableUntil) { setCountdown(''); return }
+    const tick = () => {
+      const remaining = availableUntil - Date.now()
+      if (remaining <= 0) {
+        handleCancelAvailable()
+        return
+      }
+      const mins = Math.floor(remaining / 60000)
+      const secs = Math.floor((remaining % 60000) / 1000)
+      setCountdown(`${mins}:${secs.toString().padStart(2, '0')}`)
+    }
+    tick()
+    const id = setInterval(tick, 1000)
+    return () => clearInterval(id)
+  }, [availableUntil, handleCancelAvailable])
+
+  // Cleanup guest timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (guestTimeoutRef.current) clearTimeout(guestTimeoutRef.current)
+    }
+  }, [])
+
+  /** Start the WebRTC call once the signaling room is open (skip in available mode). */
+  useEffect(() => {
+    if (roomState === 'open' && callState === 'idle' && activeRoomId && !availableMode && !guestWaitingForHost) {
+      startCall()
+    }
+  }, [roomState, callState, activeRoomId, availableMode, guestWaitingForHost, startCall])
+
+  /** End the meeting and clean up. */
+  const handleEndMeeting = useCallback(() => {
+    endCall()
+    if (roomRef.current) {
+      roomRef.current.close()
+      roomRef.current = null
+    }
+    if (peerUnsubRef.current) {
+      peerUnsubRef.current()
+      peerUnsubRef.current = null
+    }
+    if (guestTimeoutRef.current) {
+      clearTimeout(guestTimeoutRef.current)
+      guestTimeoutRef.current = null
+    }
+    setRoom(null)
+    setActiveRoomId(null)
+    setRoomState('closed')
+    setAvailableMode(false)
+    setAvailableUntil(null)
+    setGuestWaiting(false)
+    setPeerNames([])
+    setGuestWaitingForHost(false)
+    setGuestTimedOut(false)
     // Remove ?room= from URL if present
     if (urlRoomId) {
       window.history.replaceState({}, '', window.location.pathname)
@@ -216,6 +373,116 @@ export default function App() {
               Sign in with Google
             </button>
           </div>
+        </div>
+      </Shell>
+    )
+  }
+
+  // Host: available mode screen — room is open but cameras are not started
+  if (activeRoomId && availableMode) {
+    return (
+      <Shell user={user} onSignIn={(p) => fas.auth.signIn(p)} onSignOut={() => fas.auth.signOut()}>
+        <div className="flex flex-1 flex-col items-center justify-center gap-6 py-8">
+          <div className="flex flex-col items-center gap-2">
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[var(--success)]/15">
+              <div className="h-4 w-4 animate-pulse rounded-full bg-[var(--success)]" />
+            </div>
+            <h2 className="display-font text-2xl font-bold text-[var(--ink)]">You're Available</h2>
+            <p className="text-sm text-[var(--muted)]">Waiting for someone to join...</p>
+          </div>
+
+          {/* Countdown */}
+          <div className="flex flex-col items-center gap-1">
+            <span className="font-mono text-3xl font-bold text-[var(--ink)]">{countdown}</span>
+            <span className="text-xs text-[var(--muted)]">remaining</span>
+          </div>
+
+          {/* Connection status */}
+          <ConnectionBadge state={roomState} />
+
+          {/* Guest waiting alert */}
+          {guestWaiting && (
+            <div className="flex w-full max-w-sm flex-col items-center gap-4 rounded-2xl border-2 border-[var(--success)] bg-[var(--success)]/10 p-6">
+              <div className="flex items-center gap-2">
+                <div className="h-3 w-3 animate-pulse rounded-full bg-[var(--success)]" />
+                <span className="text-base font-bold text-[var(--ink)]">
+                  {peerNames.length === 1 ? `${peerNames[0]} wants to talk` : 'Someone wants to talk'}
+                </span>
+              </div>
+              <button
+                onClick={handleStartFromAvailable}
+                className="w-full rounded-xl bg-[var(--success)] px-6 py-4 text-lg font-bold text-white hover:opacity-90"
+              >
+                Start Call
+              </button>
+            </div>
+          )}
+
+          {/* Copy link + Cancel */}
+          <div className="flex w-full max-w-sm flex-col gap-3">
+            <button
+              onClick={copyLink}
+              className={`w-full rounded-xl border border-[var(--line)] px-6 py-3 text-sm font-semibold transition-colors ${
+                copied
+                  ? 'border-[var(--success)] bg-[var(--success)]/10 text-[var(--success)]'
+                  : 'bg-[var(--glass)] text-[var(--ink)] hover:bg-[var(--glass-hover)]'
+              }`}
+            >
+              {copied ? 'Link Copied!' : 'Copy Meeting Link'}
+            </button>
+            <button
+              onClick={handleCancelAvailable}
+              className="w-full rounded-xl border border-[var(--line)] bg-[var(--glass)] px-6 py-3 text-sm font-semibold text-[var(--muted)] hover:border-[var(--error)] hover:text-[var(--error)]"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </Shell>
+    )
+  }
+
+  // Guest: waiting for host to start cameras
+  if (activeRoomId && guestWaitingForHost) {
+    return (
+      <Shell user={user} onSignIn={(p) => fas.auth.signIn(p)} onSignOut={() => fas.auth.signOut()}>
+        <div className="flex flex-1 flex-col items-center justify-center gap-6 py-8">
+          {guestTimedOut ? (
+            <>
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[var(--error)]/15">
+                <svg className="h-8 w-8 text-[var(--error)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                </svg>
+              </div>
+              <h2 className="display-font text-xl font-bold text-[var(--ink)]">Host didn't respond</h2>
+              <p className="max-w-xs text-center text-sm text-[var(--muted)]">
+                Try again later or ask the host to start a meeting.
+              </p>
+              <button
+                onClick={handleEndMeeting}
+                className="rounded-xl border border-[var(--line)] bg-[var(--glass)] px-6 py-3 text-sm font-semibold text-[var(--ink)] hover:bg-[var(--glass-hover)]"
+              >
+                Go Back
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[var(--accent)]/15">
+                <div className="h-4 w-4 animate-pulse rounded-full bg-[var(--accent)]" />
+              </div>
+              <h2 className="display-font text-xl font-bold text-[var(--ink)]">Host has been notified</h2>
+              <p className="max-w-xs text-center text-sm text-[var(--muted)]">
+                Please wait while the host starts the call...
+              </p>
+              <ConnectionBadge state={roomState} />
+              <button
+                onClick={handleEndMeeting}
+                className="rounded-xl border border-[var(--line)] bg-[var(--glass)] px-6 py-3 text-sm font-semibold text-[var(--muted)] hover:text-[var(--ink)]"
+              >
+                Leave
+              </button>
+            </>
+          )}
         </div>
       </Shell>
     )
@@ -379,6 +646,12 @@ export default function App() {
             >
               Join Meeting
             </button>
+            <button
+              onClick={handleGuestJoinAvailable}
+              className="w-full rounded-xl border border-[var(--line)] bg-[var(--glass)] px-6 py-3 text-sm font-semibold text-[var(--ink)] hover:bg-[var(--glass-hover)]"
+            >
+              Join &amp; Wait for Host
+            </button>
           </div>
         ) : (
           /* Host flow */
@@ -423,13 +696,40 @@ export default function App() {
               </p>
             </div>
 
-            {/* Start meeting button */}
+            {/* Duration selector for Go Available */}
+            <div className="flex w-full max-w-sm items-center justify-center gap-2">
+              <span className="text-xs text-[var(--muted)]">Available for</span>
+              {[10, 30, 60].map((mins) => (
+                <button
+                  key={mins}
+                  onClick={() => setAvailableDuration(mins)}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
+                    availableDuration === mins
+                      ? 'bg-[var(--success)]/15 text-[var(--success)] border border-[var(--success)]'
+                      : 'border border-[var(--line)] text-[var(--muted)] hover:border-[var(--line-strong)] hover:text-[var(--ink)]'
+                  }`}
+                >
+                  {mins < 60 ? `${mins}m` : '1hr'}
+                </button>
+              ))}
+            </div>
+
+            {/* Go Available button */}
+            <button
+              onClick={handleGoAvailable}
+              disabled={!myRoomId}
+              className="w-full max-w-sm rounded-xl bg-[var(--success)] px-6 py-4 text-lg font-bold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Go Available
+            </button>
+
+            {/* Start meeting button — secondary */}
             <button
               onClick={handleStartMeeting}
               disabled={!myRoomId}
-              className="w-full max-w-sm rounded-xl bg-[var(--accent)] px-6 py-4 text-lg font-bold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              className="w-full max-w-sm rounded-xl border border-[var(--line)] bg-[var(--glass)] px-6 py-3 text-sm font-semibold text-[var(--ink)] hover:bg-[var(--glass-hover)] disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Start Meeting
+              Start Meeting Now
             </button>
           </>
         )}
