@@ -121,6 +121,11 @@ export default function App() {
     const r = fas.rooms.join(roomName)
     roomRef.current = r
 
+    // Diagnostic: raw listener to verify SDK delivers messages at all
+    r.onMessage((msg: unknown) => {
+      console.log('[meet] RAW onMessage:', JSON.stringify(msg))
+    })
+
     // Subscribe IMMEDIATELY — before React re-renders
     setRoom(r)
 
