@@ -130,7 +130,7 @@ export default function App() {
     // Subscribe to signaling IMMEDIATELY
     setRoom(r)
 
-    r.onConnectionState((state) => {
+    r.onConnectionState((state: ConnectionState) => {
       setRoomState(state)
     })
   }, [])
