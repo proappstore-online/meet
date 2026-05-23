@@ -5,6 +5,7 @@ import { Shell } from './components/Shell.tsx'
 import { VideoTile } from './components/VideoTile.tsx'
 import { useWebRTC } from './hooks/useWebRTC.ts'
 import { generateRoomId, getRoomIdFromUrl, getMeetingLink } from './lib/room.ts'
+import { createRawRoom } from './lib/raw-room.ts'
 
 const fas = initApp({ appId: 'meet' })
 
@@ -117,24 +118,21 @@ export default function App() {
     setActiveRoomId(roomId)
 
     const roomName = `meet-${roomId}`
-    const r = fas.rooms.join(roomName)
+    const token = fas.auth.token
+    if (!token) { console.log('[meet] no auth token!'); return }
+
+    // Use raw WebSocket instead of SDK Room — full logging, no SDK black box
+    const logFn = (msg: string) => console.log(`[meet] ${msg}`)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const r = createRawRoom('meet', roomName, token, logFn) as any
     roomRef.current = r
 
-    // Subscribe IMMEDIATELY — before React re-renders
+    // Subscribe to signaling IMMEDIATELY
     setRoom(r)
 
-    // Diagnostic: raw listener + room name in visible log
-    r.onMessage((msg: unknown) => {
-      console.log('[meet] RAW onMessage:', JSON.stringify(msg))
-    })
-
     r.onConnectionState((state) => {
-      console.log(`[meet] room=${roomName} role=${asHost ? 'HOST' : 'GUEST'} state=${state}`)
       setRoomState(state)
     })
-
-    // Log the join to the in-app debug panel via console (visible in browser)
-    console.log(`[meet] joinRoom: name=${roomName} role=${asHost ? 'HOST' : 'GUEST'} roomId=${roomId}`)
   }, [])
 
   /** Start a meeting as host. */
