@@ -116,6 +116,7 @@ export default function App() {
   const [friendsLoading, setFriendsLoading] = useState(false)
   const [friendsOpen, setFriendsOpen] = useState(false)
   const [friendLinkCopied, setFriendLinkCopied] = useState(false)
+  const [friendInviteDismissed, setFriendInviteDismissed] = useState(false)
 
   // Chat/reactions state
   const [chatOpen, setChatOpen] = useState(false)
@@ -300,19 +301,17 @@ export default function App() {
     // Notify all friends (fire-and-forget, cap at 30)
     const meetingLink = getMeetingLink(myRoomId)
     const toNotify = friends.slice(0, 30)
-    for (const friend of toNotify) {
-      try {
-        await app.notifications.notifyUser(friend.userId, {
+    if (friends.length > 30) console.warn(`[meet] ${friends.length} friends, only notifying first 30`)
+    Promise.allSettled(
+      toNotify.map((friend) =>
+        app.notifications.notifyUser(friend.userId, {
           title: 'Meet',
           body: `${user.login || 'Someone'} is available to talk!`,
           url: meetingLink,
           tag: `meet-available-${myRoomId}`,
-        })
-      } catch (e) {
-        console.warn('[meet] Failed to notify friend:', friend.userId, e)
-      }
-    }
-    if (friends.length > 30) console.warn(`[meet] ${friends.length} friends, only notified first 30`)
+        }).catch((e) => console.warn('[meet] Failed to notify friend:', friend.userId, e))
+      )
+    )
   }, [myRoomId, user, availabilityDuration, connectRoom, friends])
 
   // === HOST: Start call from available mode ===
@@ -594,7 +593,7 @@ export default function App() {
 
   // Lobby
   const isJoining = !!urlRoomId
-  const isFriendInvite = !urlRoomId && !!urlFriendId && urlFriendId !== user?.id
+  const isFriendInvite = !urlRoomId && !!urlFriendId && urlFriendId !== user?.id && !friendInviteDismissed
 
   // Friend request intercept — show before lobby
   if (isFriendInvite) {
@@ -611,7 +610,7 @@ export default function App() {
             </p>
             <p className="text-center text-xs text-[var(--muted)]">They'll be able to notify you when they go available.</p>
             <button onClick={() => handleAddFriend(urlFriendId!, urlFriendName || '')} className="w-full rounded-xl bg-[var(--accent)] px-6 py-3.5 text-base font-bold text-white hover:opacity-90">Add Friend</button>
-            <button onClick={() => window.history.replaceState({}, '', window.location.pathname)} className="w-full rounded-xl border border-[var(--line-strong)] bg-[var(--glass)] px-6 py-3 text-sm font-semibold text-[var(--muted)] hover:bg-[var(--glass-hover)] hover:text-[var(--ink)]">Skip</button>
+            <button onClick={() => { window.history.replaceState({}, '', window.location.pathname); setFriendInviteDismissed(true) }} className="w-full rounded-xl border border-[var(--line-strong)] bg-[var(--glass)] px-6 py-3 text-sm font-semibold text-[var(--muted)] hover:bg-[var(--glass-hover)] hover:text-[var(--ink)]">Skip</button>
           </div>
         </div>
       </Shell>
