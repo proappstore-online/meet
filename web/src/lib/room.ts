@@ -26,3 +26,20 @@ export function getRoomIdFromUrl(): string | null {
 export function getMeetingLink(roomId: string): string {
   return `${window.location.origin}?room=${roomId}`
 }
+
+/** Read ?friend= from the current URL. Returns null if missing. */
+export function getFriendIdFromUrl(): string | null {
+  const params = new URLSearchParams(window.location.search)
+  return params.get('friend') || null
+}
+
+/** Read ?fn= (friend name) from the current URL. Returns null if missing. */
+export function getFriendNameFromUrl(): string | null {
+  const params = new URLSearchParams(window.location.search)
+  return params.get('fn') || null
+}
+
+/** Build a friend invite link for the current user. */
+export function getFriendLink(userId: string, login: string): string {
+  return `${window.location.origin}?friend=${encodeURIComponent(userId)}&fn=${encodeURIComponent(login)}`
+}

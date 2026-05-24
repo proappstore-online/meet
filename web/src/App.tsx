@@ -1,15 +1,14 @@
 import { useState, useEffect, useCallback, useRef, type FormEvent } from 'react'
-import { initPro } from '@proappstore/sdk'
 import type { User, Room, ConnectionState, RoomPeer } from '@proappstore/sdk'
 import { Shell } from './components/Shell.tsx'
 import { VideoTile } from './components/VideoTile.tsx'
 import { useWebRTC, type ChatMessage } from './hooks/useWebRTC.ts'
-import { generateRoomId, getRoomIdFromUrl, getMeetingLink } from './lib/room.ts'
+import { generateRoomId, getRoomIdFromUrl, getMeetingLink, getFriendIdFromUrl, getFriendNameFromUrl, getFriendLink } from './lib/room.ts'
 import { createRawRoom } from './lib/raw-room.ts'
+import { ensureMigrated, sendFriendRequest, getFriendRequests, acceptFriendRequest, declineFriendRequest, getFriends, removeFriend, type Friend, type FriendRequest } from './lib/db.ts'
+import { app } from './lib/app.ts'
 
 declare const __BUILD_HASH__: string
-
-const app = initPro({ appId: 'meet' })
 
 type AvailabilityDuration = 10 | 30 | 60
 
@@ -111,6 +110,13 @@ export default function App() {
   const [guestWaiting, setGuestWaiting] = useState(false)
   const [guestTimedOut, setGuestTimedOut] = useState(false)
 
+  // Friends state
+  const [friends, setFriends] = useState<Friend[]>([])
+  const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([])
+  const [friendsLoading, setFriendsLoading] = useState(false)
+  const [friendsOpen, setFriendsOpen] = useState(false)
+  const [friendLinkCopied, setFriendLinkCopied] = useState(false)
+
   // Chat/reactions state
   const [chatOpen, setChatOpen] = useState(false)
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false)
@@ -169,7 +175,21 @@ export default function App() {
     return () => controller.abort()
   }, [user])
 
+  // Load friends on login
+  useEffect(() => {
+    if (!user) { setFriends([]); setFriendRequests([]); return }
+    let cancelled = false
+    setFriendsLoading(true)
+    ensureMigrated().then(async () => {
+      const [f, r] = await Promise.all([getFriends(user.id), getFriendRequests(user.id)])
+      if (!cancelled) { setFriends(f); setFriendRequests(r); setFriendsLoading(false) }
+    }).catch(() => { if (!cancelled) setFriendsLoading(false) })
+    return () => { cancelled = true }
+  }, [user])
+
   const urlRoomId = getRoomIdFromUrl()
+  const urlFriendId = getFriendIdFromUrl()
+  const urlFriendName = getFriendNameFromUrl()
 
   const regenerateLink = useCallback(async () => {
     if (!user) return
@@ -217,6 +237,44 @@ export default function App() {
     if (urlRoomId) window.history.replaceState({}, '', window.location.pathname)
   }, [endCall, urlRoomId, setRoom])
 
+  // === Friends ===
+  const handleAddFriend = useCallback(async (targetId: string, targetLogin: string) => {
+    if (!user) return
+    await sendFriendRequest(user.id, user.login || '', targetId, targetLogin)
+    // Clear URL params
+    window.history.replaceState({}, '', window.location.pathname)
+    // Reload requests
+    const [f, r] = await Promise.all([getFriends(user.id), getFriendRequests(user.id)])
+    setFriends(f); setFriendRequests(r)
+  }, [user])
+
+  const handleAcceptFriend = useCallback(async (otherId: string) => {
+    if (!user) return
+    await acceptFriendRequest(user.id, otherId)
+    const [f, r] = await Promise.all([getFriends(user.id), getFriendRequests(user.id)])
+    setFriends(f); setFriendRequests(r)
+  }, [user])
+
+  const handleDeclineFriend = useCallback(async (otherId: string) => {
+    if (!user) return
+    await declineFriendRequest(user.id, otherId)
+    const r = await getFriendRequests(user.id)
+    setFriendRequests(r)
+  }, [user])
+
+  const handleRemoveFriend = useCallback(async (otherId: string) => {
+    if (!user) return
+    await removeFriend(user.id, otherId)
+    setFriends(prev => prev.filter(f => f.userId !== otherId))
+  }, [user])
+
+  const handleCopyFriendLink = useCallback(async () => {
+    if (!user) return
+    await navigator.clipboard.writeText(getFriendLink(user.id, user.login || ''))
+    setFriendLinkCopied(true)
+    setTimeout(() => setFriendLinkCopied(false), 2000)
+  }, [user])
+
   // === HOST: Go Available ===
   const handleGoAvailable = useCallback(async () => {
     if (!myRoomId || !user) return
@@ -238,7 +296,24 @@ export default function App() {
       const others = peers.filter((p: RoomPeer) => p.uid !== user.id)
       if (others.length > 0) setGuestJoined(true)
     })
-  }, [myRoomId, user, availabilityDuration, connectRoom])
+
+    // Notify all friends (fire-and-forget, cap at 30)
+    const meetingLink = getMeetingLink(myRoomId)
+    const toNotify = friends.slice(0, 30)
+    for (const friend of toNotify) {
+      try {
+        await app.notifications.notifyUser(friend.userId, {
+          title: 'Meet',
+          body: `${user.login || 'Someone'} is available to talk!`,
+          url: meetingLink,
+          tag: `meet-available-${myRoomId}`,
+        })
+      } catch (e) {
+        console.warn('[meet] Failed to notify friend:', friend.userId, e)
+      }
+    }
+    if (friends.length > 30) console.warn(`[meet] ${friends.length} friends, only notified first 30`)
+  }, [myRoomId, user, availabilityDuration, connectRoom, friends])
 
   // === HOST: Start call from available mode ===
   const handleStartCallFromAvailable = useCallback(() => {
@@ -519,6 +594,29 @@ export default function App() {
 
   // Lobby
   const isJoining = !!urlRoomId
+  const isFriendInvite = !urlRoomId && !!urlFriendId && urlFriendId !== user?.id
+
+  // Friend request intercept — show before lobby
+  if (isFriendInvite) {
+    return (
+      <Shell user={user} onSignIn={(p) => app.auth.signIn(p)} onSignOut={() => app.auth.signOut()}>
+        <div className="flex flex-1 flex-col items-center justify-center gap-6 py-8">
+          <h1 className="display-font text-3xl font-bold text-[var(--ink)]">Friend Request</h1>
+          <div className="flex w-full max-w-sm flex-col items-center gap-5 rounded-2xl border border-[var(--line)] bg-[var(--glass)] p-6">
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[var(--accent)]/15">
+              <svg className="h-8 w-8 text-[var(--accent)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M18 7.5v3m0 0v3m0-3h3m-3 0h-3m-2.25-4.125a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0ZM3 19.235v-.11a6.375 6.375 0 0 1 12.75 0v.109A12.318 12.318 0 0 1 9.374 21c-2.331 0-4.512-.645-6.374-1.766Z" /></svg>
+            </div>
+            <p className="text-center text-sm text-[var(--ink)]">
+              Add <span className="font-semibold">{urlFriendName || 'this user'}</span> as a friend?
+            </p>
+            <p className="text-center text-xs text-[var(--muted)]">They'll be able to notify you when they go available.</p>
+            <button onClick={() => handleAddFriend(urlFriendId!, urlFriendName || '')} className="w-full rounded-xl bg-[var(--accent)] px-6 py-3.5 text-base font-bold text-white hover:opacity-90">Add Friend</button>
+            <button onClick={() => window.history.replaceState({}, '', window.location.pathname)} className="w-full rounded-xl border border-[var(--line-strong)] bg-[var(--glass)] px-6 py-3 text-sm font-semibold text-[var(--muted)] hover:bg-[var(--glass-hover)] hover:text-[var(--ink)]">Skip</button>
+          </div>
+        </div>
+      </Shell>
+    )
+  }
 
   return (
     <Shell user={user} onSignIn={(p) => app.auth.signIn(p)} onSignOut={() => app.auth.signOut()}>
@@ -562,7 +660,9 @@ export default function App() {
                   ))}
                 </div>
               </div>
-              <p className="text-xs text-[var(--muted)]">Wait for someone to join. You'll get a push notification.</p>
+              <p className="text-xs text-[var(--muted)]">
+                Wait for someone to join.{friends.length > 0 ? ` ${friends.length} friend${friends.length > 1 ? 's' : ''} will be notified.` : ' You\'ll get a push notification.'}
+              </p>
               <button onClick={handleGoAvailable} disabled={!myRoomId} className="w-full rounded-xl bg-[var(--success)] px-4 py-3 text-sm font-bold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50">Go Available</button>
             </div>
 
@@ -576,6 +676,55 @@ export default function App() {
                 </>
               ) : (
                 <div className="h-8 flex-1 animate-pulse rounded-lg bg-[var(--glass)]" />
+              )}
+            </div>
+
+            {/* Friends section */}
+            <div className="flex w-full flex-col gap-3 rounded-2xl border border-[var(--line)] bg-[var(--glass)] p-5">
+              <div className="flex items-center justify-between">
+                <button onClick={() => setFriendsOpen(p => !p)} className="flex items-center gap-2 text-sm font-semibold text-[var(--ink)]">
+                  <svg className={`h-3.5 w-3.5 transition-transform ${friendsOpen ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
+                  Friends{friends.length > 0 && ` (${friends.length})`}
+                  {friendRequests.length > 0 && <span className="flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-[var(--accent)] px-1 text-[0.6rem] font-bold text-white">{friendRequests.length}</span>}
+                </button>
+                <button onClick={handleCopyFriendLink} className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors ${friendLinkCopied ? 'text-[var(--success)]' : 'text-[var(--muted)] hover:text-[var(--ink)]'}`}>
+                  {friendLinkCopied ? 'Link Copied!' : 'Add Friend'}
+                </button>
+              </div>
+
+              {friendsOpen && (
+                <div className="flex flex-col gap-2">
+                  {friendsLoading && <p className="text-xs text-[var(--muted)]">Loading...</p>}
+
+                  {friendRequests.length > 0 && (
+                    <div className="flex flex-col gap-2">
+                      <p className="text-xs font-medium text-[var(--muted)]">Pending requests</p>
+                      {friendRequests.map((req) => (
+                        <div key={req.fromUserId} className="flex items-center justify-between rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2">
+                          <span className="text-sm text-[var(--ink)]">{req.fromLogin || req.fromUserId.slice(0, 8)}</span>
+                          <div className="flex gap-1.5">
+                            <button onClick={() => handleAcceptFriend(req.fromUserId)} className="rounded-md bg-[var(--success)] px-2.5 py-1 text-xs font-semibold text-white hover:opacity-90">Accept</button>
+                            <button onClick={() => handleDeclineFriend(req.fromUserId)} className="rounded-md border border-[var(--line-strong)] px-2.5 py-1 text-xs text-[var(--muted)] hover:text-[var(--ink)]">Decline</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {friends.length > 0 ? (
+                    <div className="flex flex-col gap-1.5">
+                      {friendRequests.length > 0 && <p className="mt-1 text-xs font-medium text-[var(--muted)]">Friends</p>}
+                      {friends.map((f) => (
+                        <div key={f.userId} className="flex items-center justify-between rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2">
+                          <span className="text-sm text-[var(--ink)]">{f.login || f.userId.slice(0, 8)}</span>
+                          <button onClick={() => handleRemoveFriend(f.userId)} className="text-xs text-[var(--muted)] hover:text-[var(--error)]">Remove</button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : !friendsLoading && friendRequests.length === 0 && (
+                    <p className="text-xs text-[var(--muted)]">No friends yet. Share your friend link to get started.</p>
+                  )}
+                </div>
               )}
             </div>
           </div>
