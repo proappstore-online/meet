@@ -242,6 +242,8 @@ export default function App() {
   const handleAddFriend = useCallback(async (targetId: string, targetLogin: string) => {
     if (!user) return
     await sendFriendRequest(user.id, user.login || '', targetId, targetLogin)
+    // Ensure push subscription so we receive notifications when friends go available
+    try { await app.notifications.subscribe('/push-sw.js') } catch {}
     // Clear URL params
     window.history.replaceState({}, '', window.location.pathname)
     // Reload requests
@@ -252,6 +254,8 @@ export default function App() {
   const handleAcceptFriend = useCallback(async (otherId: string) => {
     if (!user) return
     await acceptFriendRequest(user.id, otherId)
+    // Ensure push subscription so friend's "go available" notifications reach us
+    try { await app.notifications.subscribe('/push-sw.js') } catch {}
     const [f, r] = await Promise.all([getFriends(user.id), getFriendRequests(user.id)])
     setFriends(f); setFriendRequests(r)
   }, [user])
