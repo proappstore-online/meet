@@ -1,32 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, beforeEach } from 'vitest'
-import { orderedPair } from '../src/lib/db.ts'
 import { getFriendIdFromUrl, getFriendNameFromUrl, getFriendLink, getRoomIdFromUrl } from '../src/lib/room.ts'
-
-describe('orderedPair', () => {
-  it('returns alphabetically ordered pair', () => {
-    expect(orderedPair('alice', 'bob')).toEqual(['alice', 'bob'])
-    expect(orderedPair('bob', 'alice')).toEqual(['alice', 'bob'])
-  })
-
-  it('is consistent regardless of input order', () => {
-    const ids = ['user-z', 'user-a', 'user-m']
-    for (const a of ids) {
-      for (const b of ids) {
-        if (a === b) continue
-        const [x, y] = orderedPair(a, b)
-        const [x2, y2] = orderedPair(b, a)
-        expect(x).toBe(x2)
-        expect(y).toBe(y2)
-        expect(x < y).toBe(true)
-      }
-    }
-  })
-
-  it('handles equal strings', () => {
-    expect(orderedPair('same', 'same')).toEqual(['same', 'same'])
-  })
-})
 
 describe('getFriendIdFromUrl', () => {
   beforeEach(() => {

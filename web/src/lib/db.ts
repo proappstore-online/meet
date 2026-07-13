@@ -1,4 +1,5 @@
 import { app } from './app.ts'
+import { q, x } from './actions.ts'
 
 export interface Friend {
   userId: string
@@ -34,47 +35,47 @@ const MIGRATIONS = [
 ]
 
 let migrated = false
+
+/**
+ * Apply pending migrations. Raw `db.migrate` is restricted to the app's team
+ * since the platform's cross-tenant SQL lockdown, so regular users get a 403
+ * here — that's fine: the schema is already migrated (a team member's visit
+ * applies anything new), so swallow the 403 and continue. Every user-facing
+ * read/write goes through registered actions, not raw SQL.
+ */
 export async function ensureMigrated(): Promise<void> {
   if (migrated) return
-  await app.db.migrate(MIGRATIONS)
+  try {
+    await app.db.migrate(MIGRATIONS)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    if (!message.includes('403')) throw err
+  }
   migrated = true
 }
 
-export function orderedPair(a: string, b: string): [string, string] {
-  return a < b ? [a, b] : [b, a]
-}
-
 export async function sendFriendRequest(
-  myId: string,
+  _myId: string,
   myLogin: string,
   targetId: string,
   targetLogin: string,
 ): Promise<void> {
-  await ensureMigrated()
-  const [userA, userB] = orderedPair(myId, targetId)
-  const aLogin = userA === myId ? myLogin : targetLogin
-  const bLogin = userB === myId ? myLogin : targetLogin
-  await app.db.execute(
-    `INSERT OR IGNORE INTO friendships (user_a, user_b, requester, status, a_login, b_login, created_at)
-     VALUES (?, ?, ?, 'pending', ?, ?, ?)`,
-    [userA, userB, myId, aLogin, bLogin, Date.now()],
-  )
+  await x('send_friend_request', {
+    target_id: targetId,
+    my_login: myLogin,
+    target_login: targetLogin,
+  })
 }
 
-export async function getFriendRequests(myId: string): Promise<FriendRequest[]> {
-  await ensureMigrated()
-  const { rows } = await app.db.query<{
+export async function getFriendRequests(_myId: string): Promise<FriendRequest[]> {
+  const rows = await q<{
     user_a: string
     user_b: string
     requester: string
     a_login: string
     b_login: string
     created_at: number
-  }>(
-    `SELECT user_a, user_b, requester, a_login, b_login, created_at FROM friendships
-     WHERE (user_a = ? OR user_b = ?) AND status = 'pending' AND requester != ?`,
-    [myId, myId, myId],
-  )
+  }>('list_friend_requests')
   return rows.map((r) => {
     const fromUserId = r.requester
     const fromLogin = r.user_a === fromUserId ? r.a_login : r.b_login
@@ -82,37 +83,22 @@ export async function getFriendRequests(myId: string): Promise<FriendRequest[]> 
   })
 }
 
-export async function acceptFriendRequest(myId: string, otherId: string): Promise<void> {
-  await ensureMigrated()
-  const [userA, userB] = orderedPair(myId, otherId)
-  await app.db.execute(
-    `UPDATE friendships SET status = 'accepted', accepted_at = ? WHERE user_a = ? AND user_b = ? AND status = 'pending'`,
-    [Date.now(), userA, userB],
-  )
+export async function acceptFriendRequest(_myId: string, otherId: string): Promise<void> {
+  await x('accept_friend_request', { other_id: otherId })
 }
 
-export async function declineFriendRequest(myId: string, otherId: string): Promise<void> {
-  await ensureMigrated()
-  const [userA, userB] = orderedPair(myId, otherId)
-  await app.db.execute(
-    `DELETE FROM friendships WHERE user_a = ? AND user_b = ? AND status = 'pending'`,
-    [userA, userB],
-  )
+export async function declineFriendRequest(_myId: string, otherId: string): Promise<void> {
+  await x('decline_friend_request', { other_id: otherId })
 }
 
 export async function getFriends(myId: string): Promise<Friend[]> {
-  await ensureMigrated()
-  const { rows } = await app.db.query<{
+  const rows = await q<{
     user_a: string
     user_b: string
     a_login: string
     b_login: string
     accepted_at: number
-  }>(
-    `SELECT user_a, user_b, a_login, b_login, accepted_at FROM friendships
-     WHERE (user_a = ? OR user_b = ?) AND status = 'accepted'`,
-    [myId, myId],
-  )
+  }>('list_friends')
   return rows.map((r) => {
     const isA = r.user_a === myId
     return {
@@ -123,11 +109,6 @@ export async function getFriends(myId: string): Promise<Friend[]> {
   })
 }
 
-export async function removeFriend(myId: string, otherId: string): Promise<void> {
-  await ensureMigrated()
-  const [userA, userB] = orderedPair(myId, otherId)
-  await app.db.execute(
-    `DELETE FROM friendships WHERE user_a = ? AND user_b = ?`,
-    [userA, userB],
-  )
+export async function removeFriend(_myId: string, otherId: string): Promise<void> {
+  await x('remove_friend', { other_id: otherId })
 }

@@ -1,0 +1,74 @@
+{
+  "tools": [
+    {
+      "name": "send_friend_request",
+      "description": "Send a friend request from the caller to a target user (ordered-pair, requester is the caller)",
+      "operation": "execute",
+      "sql": "INSERT OR IGNORE INTO friendships (user_a, user_b, requester, status, a_login, b_login, created_at) VALUES (CASE WHEN :__user_id < :target_id THEN :__user_id ELSE :target_id END, CASE WHEN :__user_id < :target_id THEN :target_id ELSE :__user_id END, :__user_id, 'pending', CASE WHEN :__user_id < :target_id THEN :my_login ELSE :target_login END, CASE WHEN :__user_id < :target_id THEN :target_login ELSE :my_login END, :__now)",
+      "params": {
+        "target_id": {
+          "type": "string"
+        },
+        "my_login": {
+          "type": "string"
+        },
+        "target_login": {
+          "type": "string"
+        }
+      },
+      "requires_auth": true
+    },
+    {
+      "name": "list_friend_requests",
+      "description": "Pending incoming friend requests for the caller (requests the caller did not send)",
+      "operation": "query",
+      "sql": "SELECT user_a, user_b, requester, a_login, b_login, created_at FROM friendships WHERE (user_a = :__user_id OR user_b = :__user_id) AND status = 'pending' AND requester != :__user_id",
+      "params": {},
+      "requires_auth": true
+    },
+    {
+      "name": "accept_friend_request",
+      "description": "Accept a pending friend request addressed to the caller (recipient only)",
+      "operation": "execute",
+      "sql": "UPDATE friendships SET status = 'accepted', accepted_at = :__now WHERE user_a = CASE WHEN :__user_id < :other_id THEN :__user_id ELSE :other_id END AND user_b = CASE WHEN :__user_id < :other_id THEN :other_id ELSE :__user_id END AND status = 'pending' AND requester != :__user_id",
+      "params": {
+        "other_id": {
+          "type": "string"
+        }
+      },
+      "requires_auth": true
+    },
+    {
+      "name": "decline_friend_request",
+      "description": "Decline a pending friend request addressed to the caller (recipient only)",
+      "operation": "execute",
+      "sql": "DELETE FROM friendships WHERE user_a = CASE WHEN :__user_id < :other_id THEN :__user_id ELSE :other_id END AND user_b = CASE WHEN :__user_id < :other_id THEN :other_id ELSE :__user_id END AND status = 'pending' AND requester != :__user_id",
+      "params": {
+        "other_id": {
+          "type": "string"
+        }
+      },
+      "requires_auth": true
+    },
+    {
+      "name": "list_friends",
+      "description": "Accepted friends of the caller",
+      "operation": "query",
+      "sql": "SELECT user_a, user_b, a_login, b_login, accepted_at FROM friendships WHERE (user_a = :__user_id OR user_b = :__user_id) AND status = 'accepted'",
+      "params": {},
+      "requires_auth": true
+    },
+    {
+      "name": "remove_friend",
+      "description": "Remove a friendship (or withdraw a request) the caller is part of",
+      "operation": "execute",
+      "sql": "DELETE FROM friendships WHERE user_a = CASE WHEN :__user_id < :other_id THEN :__user_id ELSE :other_id END AND user_b = CASE WHEN :__user_id < :other_id THEN :other_id ELSE :__user_id END",
+      "params": {
+        "other_id": {
+          "type": "string"
+        }
+      },
+      "requires_auth": true
+    }
+  ]
+}
