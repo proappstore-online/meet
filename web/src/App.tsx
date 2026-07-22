@@ -4,7 +4,7 @@ import { Shell } from './components/Shell.tsx'
 import { VideoTile } from './components/VideoTile.tsx'
 import { useWebRTC, type ChatMessage } from './hooks/useWebRTC.ts'
 import { generateRoomId, getRoomIdFromUrl, getMeetingLink, getFriendIdFromUrl, getFriendNameFromUrl, getFriendLink } from './lib/room.ts'
-import { createRawRoom } from './lib/raw-room.ts'
+import { createChunkedRoom } from './lib/raw-room.ts'
 import { ensureMigrated, sendFriendRequest, getFriendRequests, acceptFriendRequest, declineFriendRequest, getFriends, removeFriend, type Friend, type FriendRequest } from './lib/db.ts'
 import { app } from './lib/app.ts'
 
@@ -212,11 +212,10 @@ export default function App() {
   const connectRoom = useCallback((roomId: string) => {
     if (roomRef.current) roomRef.current.close()
     const roomName = `meet-${roomId}`
-    const token = app.auth.token
-    if (!token) return null
+    if (!app.auth.user) return null
     const logFn = (msg: string) => console.log(`[meet] ${msg}`)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const r = createRawRoom('meet', roomName, token, logFn) as any
+    const r = createChunkedRoom(app.rooms.join(roomName), logFn) as any
     roomRef.current = r
     r.onConnectionState((state: ConnectionState) => setRoomState(state))
     return r

@@ -1,9 +1,14 @@
 /**
- * Raw WebSocket room — bypasses the SDK Room class entirely.
- * Same protocol as the SDK, but with full visibility into what's happening.
+ * Chunking adapter over the SDK Room.
+ *
+ * The platform caps room messages at 4KB, but WebRTC SDP/ICE payloads can
+ * exceed that — so large sends are split into `_chunk` frames and reassembled
+ * on receive. Everything else (auth, transport, reconnect, peers) is the SDK
+ * Room: no raw session token in app code, and rooms run on PAS infra (not FAS).
+ * Works in both `legacy-bearer` and `platform-cookie` modes.
  */
 
-import type { RoomMessage, RoomPeer, ConnectionState } from '@proappstore/sdk'
+import type { Room, RoomMessage, RoomPeer, ConnectionState } from '@proappstore/sdk'
 
 type Unsubscribe = () => void
 
@@ -16,164 +21,78 @@ export interface RawRoom {
   close(): void
 }
 
-export function createRawRoom(
-  appId: string,
-  roomId: string,
-  token: string,
-  log: (msg: string) => void,
-): RawRoom {
+const MAX_UNCHUNKED = 3800 // leave headroom under the 4KB frame limit
+const CHUNK_SIZE = 3000
+
+export function createChunkedRoom(room: Room, log: (msg: string) => void): RawRoom {
   const listeners = new Set<(msg: RoomMessage) => void>()
-  const peerListeners = new Set<(peers: RoomPeer[]) => void>()
-  const stateListeners = new Set<(state: ConnectionState) => void>()
-  let peers: RoomPeer[] = []
-  let ws: WebSocket | null = null
-  let connectionState: ConnectionState = 'connecting'
-  let closed = false
   const chunkBuffers = new Map<string, { chunks: string[]; received: number; total: number }>()
 
-  function setState(s: ConnectionState) {
-    if (connectionState === s) return
-    connectionState = s
-    log(`raw-room: state → ${s}`)
-    for (const l of stateListeners) l(s)
-  }
-
-  function connect() {
-    if (closed) return
-    // Rooms run on the FAS API (shared infra) — PAS API doesn't have its own Room DO
-    const url = new URL(`/v1/apps/${appId}/rooms/${roomId}`, 'wss://api.freeappstore.online')
-    url.searchParams.set('token', token)
-    log(`raw-room: connecting to ${url.pathname}`)
-    setState('connecting')
-
-    const socket = new WebSocket(url.toString())
-    ws = socket
-
-    socket.addEventListener('open', () => {
-      log('raw-room: WebSocket open')
-      setState('open')
-    })
-
-    socket.addEventListener('message', (ev) => {
-      const raw = typeof ev.data === 'string' ? ev.data : ''
-      log(`raw-room: ws recv: ${raw.slice(0, 200)}`)
+  // Single upstream subscription; fan out to app listeners after reassembly.
+  room.onMessage((msg) => {
+    let data = msg.data as unknown
+    const maybeChunk = data as { type?: string; id?: string; idx?: number; total?: number; chunk?: string }
+    if (maybeChunk?.type === '_chunk') {
+      const { id, idx, total, chunk } = maybeChunk as { id: string; idx: number; total: number; chunk: string }
+      let buf = chunkBuffers.get(id)
+      if (!buf) {
+        buf = { chunks: new Array(total).fill(''), received: 0, total }
+        chunkBuffers.set(id, buf)
+      }
+      buf.chunks[idx] = chunk
+      buf.received++
+      if (buf.received < total) return
+      chunkBuffers.delete(id)
       try {
-        const parsed = JSON.parse(raw)
-        if (parsed.kind === 'msg') {
-          let data = parsed.data
-          // Reassemble chunked messages
-          if (data?.type === '_chunk') {
-            const { id, idx, total, chunk } = data as { id: string; idx: number; total: number; chunk: string }
-            let buf = chunkBuffers.get(id)
-            if (!buf) {
-              buf = { chunks: new Array(total).fill(''), received: 0, total }
-              chunkBuffers.set(id, buf)
-            }
-            buf.chunks[idx] = chunk
-            buf.received++
-            log(`raw-room: chunk ${idx + 1}/${total} for ${id}`)
-            if (buf.received < total) return
-            // All chunks received — reassemble
-            chunkBuffers.delete(id)
-            try {
-              data = JSON.parse(buf.chunks.join(''))
-              log(`raw-room: reassembled ${id} → type=${data?.type}`)
-            } catch (e) {
-              log(`raw-room: chunk reassembly failed: ${e}`)
-              return
-            }
-          }
-          log(`raw-room: msg from=${parsed.from?.login} type=${data?.type} listeners=${listeners.size}`)
-          const msg: RoomMessage = { from: parsed.from, data, at: parsed.at }
-          for (const l of listeners) {
-            l(msg)
-          }
-        } else if (parsed.kind === 'peers') {
-          peers = parsed.peers
-          log(`raw-room: peers=[${peers.map((p: RoomPeer) => p.login).join(', ')}]`)
-          for (const l of peerListeners) l(peers)
-        } else if (parsed.kind === 'error') {
-          log(`raw-room: server error: ${parsed.error}`)
-        }
+        data = JSON.parse(buf.chunks.join(''))
       } catch (e) {
-        log(`raw-room: parse error: ${e}`)
-      }
-    })
-
-    socket.addEventListener('close', () => {
-      log('raw-room: WebSocket closed')
-      ws = null
-      if (!closed) {
-        setState('closed')
-        setTimeout(() => { if (!closed) connect() }, 2000)
-      }
-    })
-
-    socket.addEventListener('error', () => {
-      log('raw-room: WebSocket error')
-      setState('error')
-    })
-  }
-
-  connect()
-
-  const room: RawRoom = {
-    get state() { return connectionState },
-
-    send<T>(data: T) {
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        log(`raw-room: send DROPPED (ws=${ws ? ws.readyState : 'null'})`)
+        log(`chunked-room: reassembly failed: ${e}`)
         return
       }
-      const payload = JSON.stringify({ kind: 'msg', data })
-      if (payload.length <= 3800) {
-        log(`raw-room: send type=${(data as any)?.type} (${payload.length}B)`)
-        ws.send(payload)
-      } else {
-        // Split into chunks to stay under 4KB limit
-        const full = JSON.stringify(data)
-        const chunkSize = 3000
-        const totalChunks = Math.ceil(full.length / chunkSize)
-        const id = Math.random().toString(36).slice(2, 8)
-        log(`raw-room: send type=${(data as any)?.type} CHUNKED (${full.length}B → ${totalChunks} chunks)`)
-        for (let i = 0; i < totalChunks; i++) {
-          const chunk = full.slice(i * chunkSize, (i + 1) * chunkSize)
-          ws.send(JSON.stringify({ kind: 'msg', data: { type: '_chunk', id, idx: i, total: totalChunks, chunk } }))
-        }
+    }
+    const out: RoomMessage = { from: msg.from, data, at: msg.at }
+    for (const l of listeners) l(out)
+  })
+
+  return {
+    get state() {
+      return room.state
+    },
+
+    send<T>(data: T) {
+      const payload = JSON.stringify(data)
+      if (payload.length <= MAX_UNCHUNKED) {
+        room.send(data)
+        return
+      }
+      const totalChunks = Math.ceil(payload.length / CHUNK_SIZE)
+      const id = Math.random().toString(36).slice(2, 8)
+      log(`chunked-room: send CHUNKED (${payload.length}B → ${totalChunks} chunks)`)
+      for (let i = 0; i < totalChunks; i++) {
+        const chunk = payload.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE)
+        room.send({ type: '_chunk', id, idx: i, total: totalChunks, chunk })
       }
     },
 
     onMessage<T>(listener: (msg: RoomMessage<T>) => void): Unsubscribe {
       listeners.add(listener as (msg: RoomMessage) => void)
-      log(`raw-room: onMessage subscribed (count=${listeners.size})`)
       return () => {
         listeners.delete(listener as (msg: RoomMessage) => void)
-        log(`raw-room: onMessage unsubscribed (count=${listeners.size})`)
       }
     },
 
     onPeers(listener: (peers: RoomPeer[]) => void): Unsubscribe {
-      peerListeners.add(listener)
-      listener(peers)
-      return () => { peerListeners.delete(listener) }
+      return room.onPeers(listener)
     },
 
     onConnectionState(listener: (state: ConnectionState) => void): Unsubscribe {
-      stateListeners.add(listener)
-      listener(connectionState)
-      return () => { stateListeners.delete(listener) }
+      return room.onConnectionState(listener)
     },
 
     close() {
-      closed = true
-      ws?.close()
-      ws = null
-      setState('closed')
       listeners.clear()
-      peerListeners.clear()
-      stateListeners.clear()
+      chunkBuffers.clear()
+      room.close()
     },
   }
-
-  return room
 }
