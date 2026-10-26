@@ -16,8 +16,8 @@ const palette = Object.entries(site.colors)
   .map(([name, value]) => `--brand-${name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}: ${value}`)
   .join('; ')
 const links = [
-  { label: 'Privacy Policy', url: '/privacy/' },
-  { label: 'Terms & Conditions', url: '/terms/' },
+  { label: 'Privacy information', url: '/privacy/' },
+  { label: 'Using Meet', url: '/terms/' },
   site.supportUrl && { label: 'Support', url: site.supportUrl },
   site.contactEmail && { label: 'Contact', url: `mailto:${site.contactEmail}` },
 ].filter((link) => !!link)

@@ -10,7 +10,7 @@ const heading = 'mb-10 text-4xl font-bold leading-tight tracking-tight sm:text-5
 <Layout title={`${site.name} — ${site.headline}`} description={site.summary}>
   <section class={`${wrap} grid items-center gap-12 py-12 md:grid-cols-2 md:py-20`}>
     <div>
-      <p class={eyebrow}>Meet {site.name}</p>
+      <p class={eyebrow}>{site.name}</p>
       <h1 class="text-5xl font-extrabold leading-none tracking-tighter sm:text-7xl">{site.headline}</h1>
       <p class="mt-7 mb-9 max-w-xl text-lg leading-relaxed text-muted sm:text-xl">{site.summary}</p>
       <a class={button} href={site.appUrl}>{site.ctaLabel}<span aria-hidden="true">↗</span></a>
