@@ -1,12 +1,30 @@
 name: CI
 
+# Straight-to-main delivery: run on every push to main, not only on PRs
+# (PAS-OPS-004; proappstore-online/platform#204).
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
 
 jobs:
+  # Runner routing (see CLAUDE.md "CI runner rules"). Public repo: the router job
+  # and every job below run on ubuntu-latest; no billing check, no secret read.
+  # Private repo: GitHub-hosted while included minutes remain, self-hosted pags
+  # once they are spent, using the repo-level RUNNER_BILLING_TOKEN (never an org
+  # secret). No job sets its own runner label.
+  router:
+    uses: ProAgentStore/runner-router/.github/workflows/router.yml@v1
+    with:
+      included-minutes: 2000
+      self-hosted-labels: self-hosted,pags
+    secrets:
+      billing-token: ${{ secrets.RUNNER_BILLING_TOKEN }}
+
   typecheck:
-    runs-on: ubuntu-latest
+    needs: router
+    runs-on: ${{ fromJSON(needs.router.outputs.runner) }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -17,3 +35,4 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test
+      - run: pnpm test:marketing

@@ -7,8 +7,17 @@ on:
     branches: [main]
 
 jobs:
+  router:
+    uses: ProAgentStore/runner-router/.github/workflows/router.yml@v1
+    with:
+      included-minutes: 2000
+      self-hosted-labels: self-hosted,pags
+    secrets:
+      billing-token: ${{ secrets.RUNNER_BILLING_TOKEN }}
+
   compliance:
-    runs-on: ubuntu-latest
+    needs: router
+    runs-on: ${{ fromJSON(needs.router.outputs.runner) }}
     steps:
       - uses: actions/checkout@v4
 

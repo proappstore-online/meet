@@ -1,0 +1,120 @@
+---
+import Layout from '../layouts/Layout.astro'
+import { site } from '../site'
+
+const button = 'inline-flex items-center gap-2 rounded-lg bg-accent-deep px-5 py-4 font-bold text-white no-underline shadow-lg hover:brightness-110'
+const wrap = 'mx-auto w-[min(1160px,calc(100%-48px))]'
+const eyebrow = 'mb-6 text-xs font-extrabold uppercase tracking-[.18em] text-accent-deep'
+const heading = 'mb-10 text-4xl font-bold leading-tight tracking-tight sm:text-5xl'
+---
+<Layout title={`${site.name} — ${site.headline}`} description={site.summary}>
+  <section class={`${wrap} grid items-center gap-12 py-12 md:grid-cols-2 md:py-20`}>
+    <div>
+      <p class={eyebrow}>Meet {site.name}</p>
+      <h1 class="text-5xl font-extrabold leading-none tracking-tighter sm:text-7xl">{site.headline}</h1>
+      <p class="mt-7 mb-9 max-w-xl text-lg leading-relaxed text-muted sm:text-xl">{site.summary}</p>
+      <a class={button} href={site.appUrl}>{site.ctaLabel}<span aria-hidden="true">↗</span></a>
+    </div>
+    {site.heroImage ? (
+      <img class="w-full rounded-3xl object-cover shadow-2xl" src={site.heroImage.src} alt={site.heroImage.alt} width="640" height="480" />
+    ) : (
+      <div class="min-h-72 rounded-3xl bg-linear-140 from-accent to-accent-deep shadow-2xl md:min-h-96" aria-hidden="true"></div>
+    )}
+  </section>
+
+  <section class="bg-paper-deep py-20 sm:py-28">
+    <div class={wrap}>
+      <p class={eyebrow}>Why {site.name}</p>
+      <h2 class={heading}>What you can do</h2>
+      <div class="grid gap-5 md:grid-cols-3">
+        {site.benefits.map((benefit, index) => (
+          <article class="rounded-2xl border border-ink/10 bg-paper p-7">
+            <span class="mb-8 block text-sm font-extrabold text-accent-deep">0{index + 1}</span>
+            <h3 class="mb-2.5 text-xl font-bold tracking-tight">{benefit.title}</h3>
+            <p class="leading-relaxed text-muted">{benefit.body}</p>
+          </article>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section class={`${wrap} grid gap-x-[10%] py-20 sm:py-28 md:grid-cols-[.8fr_1.2fr]`}>
+    <div>
+      <p class={eyebrow}>How it works</p>
+      <h2 class={heading}>A simple way to begin</h2>
+    </div>
+    <ol>
+      {site.howItWorks.map((step, index) => (
+        <li class="relative mb-7 border-b border-ink/15 pb-7 pl-16">
+          <span class="absolute top-0 left-0 grid size-10 place-items-center rounded-full bg-accent-soft font-extrabold text-accent-deep" aria-hidden="true">{index + 1}</span>
+          <h3 class="mb-2.5 text-xl font-bold tracking-tight">{step.title}</h3>
+          <p class="leading-relaxed text-muted">{step.body}</p>
+        </li>
+      ))}
+    </ol>
+  </section>
+
+  {site.screenshots.length > 0 && (
+    <section class="bg-paper-deep py-20 sm:py-28">
+      <div class={wrap}>
+        <p class={eyebrow}>Inside the app</p>
+        <h2 class={heading}>Take a closer look</h2>
+        <div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          {site.screenshots.map((image) => <img class="w-full rounded-xl shadow-lg" src={image.src} alt={image.alt} loading="lazy" />)}
+        </div>
+      </div>
+    </section>
+  )}
+
+  <section class={`${wrap} my-8 rounded-3xl bg-ink px-8 py-20 text-center text-paper sm:my-16`}>
+    <p class="mb-6 text-xs font-extrabold uppercase tracking-[.18em] text-accent-soft">Ready when you are</p>
+    <h2 class="mb-8 text-4xl font-bold leading-tight tracking-tight sm:text-5xl">Get started with {site.name}</h2>
+    <a class={button} href={site.appUrl}>{site.ctaLabel}<span aria-hidden="true">↗</span></a>
+  </section>
+
+  {/* ── Contact / Enquiry ──────────────────────────────────────── */}
+  <section class={`${wrap} py-20`}>
+    <p class={eyebrow}>Get in touch</p>
+    <h2 class={heading}>Contact us</h2>
+
+    {/* success / error banners — the API redirects to #enquiry-<outcome>, shown via CSS :target, no JS needed */}
+    <div id="enquiry-sent" role="status" class="mb-8 hidden rounded-lg bg-green-50 p-6 text-green-800 target:block">
+      <strong>Message sent!</strong> We'll get back to you soon.
+    </div>
+    <div id="enquiry-invalid" role="alert" class="mb-8 hidden rounded-lg bg-red-50 p-6 text-red-800 target:block">
+      <strong>Something looks wrong.</strong> Please check your details and try again.
+    </div>
+    <div id="enquiry-rate-limited" role="alert" class="mb-8 hidden rounded-lg bg-yellow-50 p-6 text-yellow-800 target:block">
+      <strong>Too many messages.</strong> Please wait a while before trying again.
+    </div>
+
+    <form
+      method="POST"
+      action={`https://api.proappstore.online/v1/apps/${site.appId}/enquiries`}
+      class="mx-auto max-w-xl space-y-6"
+    >
+      {/* honeypot – bots fill it, humans don't see it */}
+      <input type="text" name="website" class="hidden" tabindex="-1" autocomplete="off" aria-hidden="true" />
+
+      <div>
+        <label for="enq-name" class="mb-1 block text-sm font-semibold">Name</label>
+        <input id="enq-name" name="name" type="text" required maxlength="100"
+          class="w-full rounded-lg border border-gray-300 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-accent-deep" />
+      </div>
+
+      <div>
+        <label for="enq-email" class="mb-1 block text-sm font-semibold">Email</label>
+        <input id="enq-email" name="email" type="email" required maxlength="254"
+          class="w-full rounded-lg border border-gray-300 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-accent-deep" />
+      </div>
+
+      <div>
+        <label for="enq-message" class="mb-1 block text-sm font-semibold">Message</label>
+        <textarea id="enq-message" name="message" required maxlength="5000" rows="5"
+          class="w-full rounded-lg border border-gray-300 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-accent-deep"></textarea>
+      </div>
+
+      <button type="submit" class={button}>Send message</button>
+    </form>
+  </section>
+</Layout>

@@ -19,7 +19,10 @@
     "build": "pnpm --filter @meet/web build",
     "preview": "pnpm --filter @meet/web preview",
     "typecheck": "pnpm --filter @meet/web exec tsc -b",
-    "test": "pnpm --filter @meet/web exec tsc -b && pnpm --filter @meet/web test"
+    "test": "pnpm --filter @meet/web exec tsc -b && pnpm --filter @meet/web test",
+    "dev:marketing": "pnpm --filter @meet/marketing dev",
+    "build:marketing": "pnpm --filter @meet/marketing build",
+    "test:marketing": "node --test tests/marketing-build.test.mjs"
   },
   "devDependencies": {
     "@types/node": "^25.9.1"

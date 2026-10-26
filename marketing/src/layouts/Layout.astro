@@ -1,0 +1,65 @@
+---
+import '../styles/global.css'
+import { site } from '../site'
+import { isPreview } from '../lib/seo'
+
+interface Props {
+  title: string
+  description: string
+}
+
+const { title, description } = Astro.props
+const canonical = new URL(Astro.url.pathname, Astro.site)
+const socialImage = new URL(site.heroImage?.src ?? '/icon-512.png', Astro.site)
+// Brand colours as --brand-* custom properties; src/styles/global.css maps them into the Tailwind theme.
+const palette = Object.entries(site.colors)
+  .map(([name, value]) => `--brand-${name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}: ${value}`)
+  .join('; ')
+const links = [
+  { label: 'Privacy Policy', url: '/privacy/' },
+  { label: 'Terms & Conditions', url: '/terms/' },
+  site.supportUrl && { label: 'Support', url: site.supportUrl },
+  site.contactEmail && { label: 'Contact', url: `mailto:${site.contactEmail}` },
+].filter((link) => !!link)
+---
+<!doctype html>
+<html lang="en" style={palette} class="scroll-smooth motion-reduce:scroll-auto">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content={site.colors.accent} />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <meta name="robots" content={isPreview ? 'noindex, nofollow' : 'index, follow'} />
+    <link rel="canonical" href={canonical} />
+    <link rel="icon" href="/icon-192.png" type="image/png" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={socialImage} />
+    <meta name="twitter:card" content={site.heroImage ? 'summary_large_image' : 'summary'} />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={socialImage} />
+    <slot name="head" />
+  </head>
+  <body>
+    <a class="absolute -left-[999px] top-3 z-10 bg-paper p-2.5 focus:left-3" href="#main">Skip to content</a>
+    <header class="mx-auto flex h-20 w-[min(1160px,calc(100%-48px))] items-center justify-between max-sm:h-18">
+      <a class="inline-flex items-center gap-3 text-lg font-extrabold tracking-tight no-underline" href="/">
+        <img src="/icon-192.png" alt="" width="28" height="28" class="rounded-lg" />{site.name}
+      </a>
+      <a class="border-b border-current pb-0.5 font-bold no-underline" href={site.appUrl}>{site.ctaLabel}<span aria-hidden="true"> ↗</span></a>
+    </header>
+    <main id="main">
+      <slot />
+    </main>
+    <footer class="mx-auto flex w-[min(1160px,calc(100%-48px))] items-center justify-between gap-6 pt-9 pb-14 text-sm text-muted max-sm:flex-col max-sm:items-start">
+      <span class="font-extrabold text-ink">© {new Date().getFullYear()} {site.owner}</span>
+      <nav aria-label="Legal and support" class="flex flex-wrap gap-6">
+        {links.map((link) => <a class="no-underline hover:underline" href={link.url}>{link.label}</a>)}
+      </nav>
+    </footer>
+  </body>
+</html>

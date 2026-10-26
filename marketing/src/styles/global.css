@@ -1,0 +1,18 @@
+@import "tailwindcss";
+
+/* Brand colours come from src/site.ts (set as --brand-* on <html> by the layout),
+   so bg-accent, text-accent-deep, bg-paper-deep, etc. are on-brand by default. */
+@theme inline {
+  --color-accent: var(--brand-accent);
+  --color-accent-deep: var(--brand-accent-deep);
+  --color-accent-soft: var(--brand-accent-soft);
+  --color-ink: var(--brand-ink);
+  --color-muted: var(--brand-muted);
+  --color-paper: var(--brand-paper);
+  --color-paper-deep: var(--brand-paper-deep);
+}
+
+@layer base {
+  body { @apply bg-paper text-ink antialiased; }
+  :focus-visible { @apply outline-3 outline-offset-4 outline-accent; }
+}

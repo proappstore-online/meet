@@ -6,3 +6,6 @@ dist
 
 # TypeScript incremental build cache
 *.tsbuildinfo
+
+# Astro generated cache
+.astro/
